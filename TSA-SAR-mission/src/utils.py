@@ -1,7 +1,6 @@
 import sys
 from contextlib import contextmanager
 
-import feather
 
 
 class SkipWith(Exception):
