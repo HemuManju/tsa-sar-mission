@@ -2,29 +2,49 @@ import pyglet
 import random
 from pyglet import shapes, text
 from pyglet.window import key
-from ai_assistant import get_sar_advice
+import textwrap
+from ai_assistant import get_sar_advice  # Adjusted import path
 
 def run_sar_mission_game():
     # --- Game Configuration ---
-    WINDOW_WIDTH = 1600
+    WINDOW_WIDTH = 1800
     WINDOW_HEIGHT = 800
-    CELL_SIZE = 20
+    CELL_SIZE = 40
     TOTAL_GRID_X = WINDOW_WIDTH // CELL_SIZE
     TOTAL_GRID_Y = WINDOW_HEIGHT // CELL_SIZE
-    TIME_LIMIT = 300 # 5 minutes in seconds
+    TIME_LIMIT = 240  # 5 minutes in seconds
 
     # --- Game State ---
     window = pyglet.window.Window(WINDOW_WIDTH, WINDOW_HEIGHT, "SAR Mission")
-    game_state = "menu"  # menu, view_select, difficulty_select, playing, game_over, game_over_time
-    difficulty = None # easy, medium, hard
+    game_state = "menu"  # menu, view_select, difficulty_select, playing, game_over, game_over_time, paused
+    difficulty = None  # easy, medium, hard
     current_zoom = "global"
     selected_initial_view = "global"
     time_remaining = TIME_LIMIT
+    paused = False
+    chat_active = False
+    chat_input = ""
+    chat_history = []
 
     # --- Batches for Rendering ---
     batch = pyglet.graphics.Batch()
     ui_batch = pyglet.graphics.Batch()
     victim_batch = pyglet.graphics.Batch()
+
+    # --- Game Objects ---
+    grid_lines = []
+    wall_blocks = []
+    obstacle_positions = set()
+    victims = []
+    player = None
+
+    # Victim configuration
+    VICTIM_TYPES = {
+        'type1': {'color': (255, 255, 0), 'count': 0},  # Yellow
+        'type2': {'color': (255, 0, 0), 'count': 0},    # Red
+        'type3': {'color': (128, 0, 128), 'count': 0}   # Purple
+    }
+    victims_found = {'type1': 0, 'type2': 0, 'type3': 0}
 
     # --- Menu UI Elements ---
     title_label = text.Label('SAR Mission',
@@ -35,7 +55,7 @@ def run_sar_mission_game():
                              font_name='Arial', font_size=20,
                              x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 + 50,
                              anchor_x='center', anchor_y='center')
-    controls_label = text.Label('Use Arrow Keys to Move | Z to Toggle Zoom | ESC to Return to Menu',
+    controls_label = text.Label('Use Arrow Keys to Move | Z to Toggle Zoom | A for AI Chat | P to Pause | ESC to Menu',
                                 font_name='Arial', font_size=12,
                                 x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 - 20,
                                 anchor_x='center', anchor_y='center')
@@ -71,37 +91,30 @@ def run_sar_mission_game():
                             font_name='Arial', font_size=16,
                             x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 - 60,
                             anchor_x='center', anchor_y='center')
-    
+
     # --- Game Over UI ---
     game_over_label = text.Label('Mission Complete!',
                                  font_name='Arial', font_size=32,
                                  x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 + 50,
                                  anchor_x='center', anchor_y='center')
     time_up_label = text.Label('Time\'s Up!',
-                                 font_name='Arial', font_size=32,
-                                 x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 + 50,
-                                 anchor_x='center', anchor_y='center')
+                               font_name='Arial', font_size=32,
+                               x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 + 50,
+                               anchor_x='center', anchor_y='center')
     restart_label = text.Label('Press ENTER to return to the menu.',
                                font_name='Arial', font_size=16,
                                x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 - 20,
                                anchor_x='center', anchor_y='center')
 
-
-    # --- Game Objects ---
-    grid_lines = []
-    wall_blocks = []
-    obstacle_positions = set()
-    victims = []
-    player = None
-    
-    # Victim configuration
-    VICTIM_TYPES = {
-        'type1': {'color': (255, 255, 0), 'count': 0}, # Yellow
-        'type2': {'color': (255, 0, 0), 'count': 0},   # Red
-        'type3': {'color': (128, 0, 128), 'count': 0}  # Purple
-    }
-    victims_found = { 'type1': 0, 'type2': 0, 'type3': 0 }
-
+    # --- Pause UI ---
+    pause_label = text.Label('Paused',
+                             font_name='Arial', font_size=32,
+                             x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 + 50,
+                             anchor_x='center', anchor_y='center')
+    resume_label = text.Label('Press P to Resume | ENTER to Return to Menu',
+                              font_name='Arial', font_size=16,
+                              x=WINDOW_WIDTH // 2, y=WINDOW_HEIGHT // 2 - 20,
+                              anchor_x='center', anchor_y='center')
 
     # --- UI Labels ---
     view_label = text.Label('', font_name='Arial', font_size=14, x=10, y=WINDOW_HEIGHT - 30, batch=ui_batch)
@@ -111,7 +124,6 @@ def run_sar_mission_game():
     victims_label_type1 = text.Label('', font_name='Arial', font_size=12, x=WINDOW_WIDTH - 150, y=WINDOW_HEIGHT - 30, batch=ui_batch)
     victims_label_type2 = text.Label('', font_name='Arial', font_size=12, x=WINDOW_WIDTH - 150, y=WINDOW_HEIGHT - 50, batch=ui_batch)
     victims_label_type3 = text.Label('', font_name='Arial', font_size=12, x=WINDOW_WIDTH - 150, y=WINDOW_HEIGHT - 70, batch=ui_batch)
-
 
     def create_shape(points, base_x, base_y):
         """Helper to create shapes from a list of relative grid points."""
@@ -158,7 +170,7 @@ def run_sar_mission_game():
         points = []
         mid = width // 2
         for i in range(height):
-            points.extend([(0, i), (width - 1, i)]) # Side legs
+            points.extend([(0, i), (width - 1, i)])  # Side legs
         for i in range(1, mid + 1):
             points.append((i, height - i))
         for i in range(1, mid):
@@ -174,7 +186,7 @@ def run_sar_mission_game():
         points = []
         mid = width // 2
         for i in range(height):
-            points.extend([(0, i), (width - 1, i)]) # Side legs
+            points.extend([(0, i), (width - 1, i)])  # Side legs
         for i in range(1, mid + 1):
             points.append((i, i))
         for i in range(1, mid):
@@ -203,7 +215,6 @@ def run_sar_mission_game():
 
     def generate_level(selected_difficulty):
         """Generates walls and victims based on difficulty."""
-        nonlocal obstacle_positions, wall_blocks, victims
         obstacle_positions.clear()
         wall_blocks.clear()
         victims.clear()
@@ -219,7 +230,6 @@ def run_sar_mission_game():
         # Difficulty-based wall generation
         wall_configs = {
             'easy': [
-                # 15 walls for easy difficulty
                 create_L_shape(5, 5, size=5, rotation=0),
                 create_L_shape(40, 18, size=4, rotation=2),
                 create_L_shape(2, 12, size=6, rotation=1),
@@ -235,37 +245,8 @@ def run_sar_mission_game():
                 create_W_shape(2, 20, width=5, height=4, rotation=0),
                 create_W_shape(40, 2, width=5, height=4, rotation=3),
                 create_W_shape(28, 8, width=7, height=4, rotation=0),
-                create_W_shape(78, 28, width=4, height=4, rotation=3),
-        create_L_shape(72, 32, size=6, rotation=2),
-        create_U_shape(75, 36, width=5, height=6, rotation=1),
-        create_T_shape(77, 26, width=6, height=4, rotation=0),
-        create_M_shape(73, 14, width=5, height=4, rotation=2),
-        create_W_shape(71, 20, width=5, height=3, rotation=0),
-         create_W_shape(30, 34, width=5, height=4, rotation=3),
-        create_L_shape(35, 28, size=5, rotation=0),
-        create_U_shape(40, 32, width=6, height=4, rotation=1),
-        create_T_shape(45, 36, width=7, height=5, rotation=2),
-        create_M_shape(50, 30, width=5, height=4, rotation=0),
-        create_W_shape(55, 34, width=4, height=3, rotation=3),
-        create_W_shape(48, 12, width=5, height=4, rotation=1),
-        create_L_shape(34, 20, size=6, rotation=2),
-        create_U_shape(38, 10, width=5, height=5, rotation=0),
-        create_T_shape(42, 16, width=6, height=4, rotation=3),
-        create_M_shape(46, 14, width=5, height=4, rotation=2),
-        create_W_shape(50, 18, width=4, height=4, rotation=0),
-        create_U_shape(65, 5,  width=3, height=12, rotation=0),   # tall bar
-        create_U_shape(70, 10, width=3, height=15, rotation=0),
-        create_U_shape(75, 20, width=2, height=10, rotation=0),
-create_T_shape(61, 8,  width=9,  height=3, rotation=0),   # band 1 (x~61..69)  -> leaves gap near pillar B
-create_T_shape(66, 16, width=11, height=3, rotation=0),   # band 2 (x~66..77) -> leaves gap left of pillar A
-create_T_shape(62, 24, width=8,  height=3, rotation=0),   # band 3 (x~62..69) -> gap to the right
-create_T_shape(68, 30, width=10, height=3, rotation=0), 
-create_M_shape(63, 18, width=7, height=4, rotation=0),    # offsets band 2 gap
-create_W_shape(71, 32, width=6, height=4, rotation=3)
-    ]
-,
+            ],
             'medium': [
-                # 20 walls for medium difficulty
                 create_L_shape(4, 4, size=7, rotation=1),
                 create_L_shape(38, 15, size=5, rotation=2),
                 create_L_shape(2, 15, size=6, rotation=2),
@@ -286,41 +267,8 @@ create_W_shape(71, 32, width=6, height=4, rotation=3)
                 create_W_shape(33, 18, width=5, height=4, rotation=1),
                 create_W_shape(5, 20, width=5, height=4, rotation=0),
                 create_W_shape(42, 5, width=3, height=3, rotation=3),
-                 create_L_shape(72, 8, size=5, rotation=0),
-        create_U_shape(74, 12, width=6, height=5, rotation=1),
-        create_T_shape(76, 18, width=5, height=4, rotation=2),
-        create_M_shape(70, 22, width=5, height=3, rotation=0),
-        create_W_shape(78, 28, width=4, height=4, rotation=3),
-        create_L_shape(10, 28, size=6, rotation=3),
-        create_U_shape(15, 32, width=7, height=5, rotation=0),
-        create_T_shape(20, 36, width=8, height=4, rotation=1),
-        create_M_shape(25, 30, width=6, height=3, rotation=2),
-        create_W_shape(30, 34, width=5, height=4, rotation=3),
-        create_L_shape(32, 12, size=5, rotation=1),
-        create_U_shape(36, 16, width=6, height=4, rotation=2),
-        create_T_shape(40, 14, width=7, height=5, rotation=0),
-        create_M_shape(44, 18, width=6, height=3, rotation=3),
-        create_W_shape(48, 12, width=5, height=4, rotation=1),
-        create_U_shape(65, 5,  width=3, height=12, rotation=0),   # tall bar
-        create_U_shape(70, 10, width=3, height=15, rotation=0),
-        create_U_shape(75, 20, width=2, height=10, rotation=0),
-        create_T_shape(62, 8,  width=10, height=3, rotation=0),
-        create_T_shape(66, 18, width=12, height=3, rotation=0),
-        create_T_shape(68, 28, width=14, height=3, rotation=0),
-                create_W_shape(50, 18, width=4, height=4, rotation=4),
-        create_U_shape(65, 5,  width=3, height=12, rotation=0),   # tall bar
-        create_U_shape(70, 10, width=3, height=15, rotation=0),
-        create_U_shape(75, 20, width=2, height=10, rotation=0),
-create_T_shape(61, 8,  width=9,  height=3, rotation=0),   # band 1 (x~61..69)  -> leaves gap near pillar B
-create_T_shape(66, 16, width=11, height=2, rotation=0),   # band 2 (x~66..77) -> leaves gap left of pillar A
-create_T_shape(62, 24, width=8,  height=3, rotation=0),   # band 3 (x~62..69) -> gap to the right
-create_T_shape(68, 30, width=10, height=6, rotation=4), 
-create_M_shape(63, 18, width=7, height=4, rotation=0),    # offsets band 2 gap
-create_W_shape(71, 32, width=6, height=4, rotation=3)
-
             ],
             'hard': [
-                #  walls for hard difficulty
                 create_L_shape(3, 3, size=8, rotation=0),
                 create_L_shape(35, 2, size=6, rotation=3),
                 create_L_shape(40, 20, size=4, rotation=2),
@@ -351,52 +299,12 @@ create_W_shape(71, 32, width=6, height=4, rotation=3)
                 create_W_shape(20, 15, width=5, height=5, rotation=1),
                 create_W_shape(8, 8, width=5, height=4, rotation=3),
                 create_W_shape(35, 15, width=5, height=4, rotation=0),
-                create_T_shape(22, 12, width=7, height=4, rotation=0),
-                create_L_shape(25, 15, size=5, rotation=3),
-                create_U_shape(18, 10, width=5, height=4, rotation=2),
-                create_T_shape(45, 22, width=7, height=4, rotation=1),
-                create_L_shape(50, 5, size=6, rotation=0),
-                create_U_shape(55, 10, width=6, height=5, rotation=2),
-                create_M_shape(60, 12, width=5, height=4, rotation=1),
-                create_W_shape(65, 18, width=5, height=4, rotation=0),
-                create_L_shape(70, 6, size=5, rotation=2),
-                create_T_shape(72, 24, width=6, height=4, rotation=3),
-                create_U_shape(48, 28, width=5, height=5, rotation=0),
-                create_M_shape(52, 30, width=6, height=3, rotation=2),
-                create_W_shape(58, 32, width=4, height=3, rotation=1),
-                create_L_shape(62, 26, size=4, rotation=3),
-                create_T_shape(68, 14, width=8, height=4, rotation=0),
-                create_U_shape(74, 20, width=4, height=6, rotation=1),
-                create_M_shape(76, 8, width=5, height=4, rotation=0),
-                create_W_shape(44, 34, width=6, height=3, rotation=2),
-                create_L_shape(28, 28, size=6, rotation=1),
-                create_T_shape(10, 26, width=7, height=4, rotation=2),
-                        create_L_shape(12, 28, size=5, rotation=0),
-        create_U_shape(18, 30, width=6, height=4, rotation=2),
-        create_T_shape(24, 32, width=7, height=4, rotation=1),
-        create_M_shape(30, 34, width=5, height=4, rotation=3),
-        create_W_shape(36, 36, width=6, height=3, rotation=0),
-        create_L_shape(42, 30, size=6, rotation=2),
-        create_U_shape(48, 24, width=5, height=5, rotation=1),
-        create_T_shape(54, 18, width=8, height=4, rotation=0),
-        create_M_shape(60, 12, width=5, height=3, rotation=2),
-        create_W_shape(66, 6, width=4, height=4, rotation=3),
-        create_L_shape(72, 5, size=6, rotation=1),
-        create_U_shape(74, 10, width=5, height=6, rotation=0),
-        create_T_shape(76, 15, width=6, height=4, rotation=2),
-        create_M_shape(70, 20, width=5, height=4, rotation=3),
-        create_W_shape(78, 25, width=4, height=4, rotation=1),
-        create_T_shape(61, 8,  width=9,  height=3, rotation=0),   # band 1 (x~61..69)  -> leaves gap near pillar B
-create_T_shape(66, 16, width=11, height=3, rotation=0),   # band 2 (x~66..77) -> leaves gap left of pillar A
-create_T_shape(62, 24, width=8,  height=3, rotation=0),   # band 3 (x~62..69) -> gap to the right
-create_T_shape(68, 30, width=10, height=3, rotation=0), 
-
             ]
         }
         
         for wall_shape in wall_configs[selected_difficulty]:
             for pos in wall_shape:
-                if 0 < pos[0] < TOTAL_GRID_X -1 and 0 < pos[1] < TOTAL_GRID_Y -1:
+                if 0 < pos[0] < TOTAL_GRID_X - 1 and 0 < pos[1] < TOTAL_GRID_Y - 1:
                     obstacle_positions.add(pos)
 
         # Draw wall blocks
@@ -416,9 +324,9 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
 
         # Victim generation
         victim_counts = {
-            'easy': {'type1': 60, 'type2': 60, 'type3': 60},
-            'medium': {'type1': 60, 'type2': 60, 'type3': 60},
-            'hard': {'type1': 60, 'type2': 60, 'type3':60}
+            'easy': {'type1': 15, 'type2': 15, 'type3': 15},
+            'medium': {'type1': 15, 'type2': 15, 'type3': 15},
+            'hard': {'type1': 15, 'type2': 15, 'type3': 15}
         }
         
         VICTIM_TYPES['type1']['count'] = victim_counts[selected_difficulty]['type1']
@@ -428,9 +336,8 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
         placed_victim_positions = set()
         for v_type, data in VICTIM_TYPES.items():
             for _ in range(data['count']):
-                if not reachable_tiles: break # No place to put victims
+                if not reachable_tiles: break  # No place to put victims
                 
-                # Find a reachable tile that doesn't have a victim yet
                 while True:
                     vx, vy = random.choice(reachable_tiles)
                     if (vx, vy) not in placed_victim_positions and (vx, vy) != (player_start_gx, player_start_gy):
@@ -447,12 +354,15 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
         
         return (player_start_gx * CELL_SIZE + CELL_SIZE // 2, player_start_gy * CELL_SIZE + CELL_SIZE // 2)
 
-    
     def setup_game(selected_difficulty):
         """Initializes game elements."""
-        nonlocal player, difficulty, time_remaining, current_zoom
+        nonlocal player, difficulty, time_remaining, current_zoom, paused, chat_active, chat_input, chat_history
         difficulty = selected_difficulty
         current_zoom = selected_initial_view
+        paused = False
+        chat_active = False
+        chat_input = ""
+        chat_history = []
         
         # Clear previous game objects if any
         if player:
@@ -479,6 +389,43 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
         gx, gy = x // CELL_SIZE, y // CELL_SIZE
         return (gx, gy) in obstacle_positions
 
+    def get_current_situation():
+        """Generates a textual description of the player's surroundings."""
+        player_gx, player_gy = player.x // CELL_SIZE, player.y // CELL_SIZE
+        situation = []
+
+        # Check 5x5 local view (or less if near boundaries)
+        view_range = 2 if current_zoom == "local" else 5  # Smaller range for local view
+        directions = [("north", (0, 1)), ("south", (0, -1)), ("east", (1, 0)), ("west", (-1, 0))]
+        
+        for direction, (dx, dy) in directions:
+            for i in range(1, view_range + 1):
+                gx, gy = player_gx + dx * i, player_gy + dy * i
+                if 0 <= gx < TOTAL_GRID_X and 0 <= gy < TOTAL_GRID_Y:
+                    if (gx, gy) in obstacle_positions:
+                        situation.append(f"walls to the {direction}")
+                        break
+                    for victim in victims:
+                        if victim['gx'] == gx and victim['gy'] == gy:
+                            color = {'type1': 'yellow', 'type2': 'red', 'type3': 'purple'}[victim['type']]
+                            situation.append(f"a {color} victim to the {direction}")
+                            break
+                    else:
+                        situation.append(f"open path to the {direction}")
+                        break
+                else:
+                    situation.append(f"boundary to the {direction}")
+                    break
+
+        # Check if the local view is cramped (many walls nearby)
+        wall_count = sum(1 for gx in range(player_gx - 2, player_gx + 3)
+                         for gy in range(player_gy - 2, player_gy + 3)
+                         if 0 <= gx < TOTAL_GRID_X and 0 <= gy < TOTAL_GRID_Y and (gx, gy) in obstacle_positions)
+        if current_zoom == "local" and wall_count > 8:
+            situation.append("the local view is cramped with many walls")
+
+        return ", ".join(situation) if situation else "no notable features nearby."
+
     def update_ui_labels():
         if game_state == "playing":
             view_label.text = f"View: {current_zoom.upper()} (Z)"
@@ -493,7 +440,7 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
     def update(dt):
         """Handles game timer and updates."""
         nonlocal time_remaining, game_state
-        if game_state == "playing":
+        if game_state == "playing" and not paused and not chat_active:
             time_remaining -= dt
             if time_remaining < 0:
                 time_remaining = 0
@@ -504,7 +451,6 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
             if time_remaining <= 0:
                 game_state = "game_over_time"
                 pyglet.clock.unschedule(update)
-
 
     def check_for_victim():
         nonlocal game_state
@@ -529,7 +475,6 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
             game_state = "game_over"
             pyglet.clock.unschedule(update)
 
-
     @window.event
     def on_draw():
         window.clear()
@@ -551,27 +496,45 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
             hard_label.draw()
 
         elif game_state == "playing":
-            # --- Game World View (Global or Local) ---
-            if current_zoom == "global":
+            if paused:
                 window.viewport = (0, 0, window.width, window.height)
                 window.projection = pyglet.math.Mat4.orthogonal_projection(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT, -1, 1)
-            else: # local zoom
-                zoom_w = 5 * CELL_SIZE
-                zoom_h = 5 * CELL_SIZE
-                left = max(0, min(WINDOW_WIDTH - zoom_w, player.x - zoom_w // 2))
-                right = left + zoom_w
-                bottom = max(0, min(WINDOW_HEIGHT - zoom_h, player.y - zoom_h // 2))
-                top = bottom + zoom_h
+                pause_label.draw()
+                resume_label.draw()
+            else:
+                # Game World View (Global or Local)
+                if current_zoom == "global":
+                    window.viewport = (0, 0, window.width, window.height)
+                    window.projection = pyglet.math.Mat4.orthogonal_projection(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT, -1, 1)
+                else:  # local zoom
+                    zoom_w = 5 * CELL_SIZE
+                    zoom_h = 5 * CELL_SIZE
+                    left = max(0, min(WINDOW_WIDTH - zoom_w, player.x - zoom_w // 2))
+                    right = left + zoom_w
+                    bottom = max(0, min(WINDOW_HEIGHT - zoom_h, player.y - zoom_h // 2))
+                    top = bottom + zoom_h
+                    window.viewport = (0, 0, window.width, window.height)
+                    window.projection = pyglet.math.Mat4.orthogonal_projection(left, right, bottom, top, -1, 1)
+
+                batch.draw()
+                victim_batch.draw()
+
+                # UI Overlay (Always full screen)
                 window.viewport = (0, 0, window.width, window.height)
-                window.projection = pyglet.math.Mat4.orthogonal_projection(left, right, bottom, top, -1, 1)
+                window.projection = pyglet.math.Mat4.orthogonal_projection(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT, -1, 1)
+                ui_batch.draw()
 
-            batch.draw()
-            victim_batch.draw()
-
-            # --- UI Overlay (Always full screen) ---
-            window.viewport = (0, 0, window.width, window.height)
-            window.projection = pyglet.math.Mat4.orthogonal_projection(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT, -1, 1)
-            ui_batch.draw()
+                if chat_active:
+                    # Draw chatbox overlay
+                    chat_box = shapes.Rectangle(0, 0, WINDOW_WIDTH, 300, color=(220, 220, 220, 180))
+                    chat_box.draw()
+                    history_text = "\n".join(chat_history[-20:])  # Limit to last 20 lines to prevent overflow
+                    chat_history_label = text.Label(history_text, font_name='Arial', font_size=12,
+                                                    x=10, y=290, width=WINDOW_WIDTH - 20, multiline=True, anchor_y='top')
+                    chat_history_label.draw()
+                    input_text = f"You: {chat_input}|"
+                    input_label = text.Label(input_text, font_name='Arial', font_size=12, x=10, y=10)
+                    input_label.draw()
             
         elif game_state == "game_over":
             game_over_label.draw()
@@ -581,10 +544,15 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
             time_up_label.draw()
             restart_label.draw()
 
+    @window.event
+    def on_text(text):
+        nonlocal chat_input
+        if chat_active:
+            chat_input += text
 
     @window.event
     def on_key_press(symbol, modifiers):
-        nonlocal game_state, current_zoom, selected_initial_view
+        nonlocal game_state, current_zoom, selected_initial_view, paused, chat_active, chat_input, chat_history
 
         if game_state == "menu":
             if symbol == key.ENTER:
@@ -604,16 +572,45 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
             if symbol == key.E:
                 setup_game('easy')
                 game_state = "playing"
+                paused = False
             elif symbol == key.M:
                 setup_game('medium')
                 game_state = "playing"
+                paused = False
             elif symbol == key.H:
                 setup_game('hard')
                 game_state = "playing"
+                paused = False
             elif symbol == key.ESCAPE:
                 game_state = "view_select"
 
         elif game_state == "playing":
+            if symbol == key.P:
+                paused = not paused
+                return
+            if paused:
+                if symbol == key.ENTER:
+                    game_state = "menu"
+                    pyglet.clock.unschedule(update)
+                    paused = False
+                return
+
+            if chat_active:
+                if symbol == key.BACKSPACE:
+                    if len(chat_input) > 0:
+                        chat_input = chat_input[:-1]
+                elif symbol == key.ENTER:
+                    if chat_input:
+                        situation = get_current_situation()
+                        response = get_sar_advice(chat_input, situation, chat_history)
+                        chat_history.append(f"Player: {chat_input}")
+                        chat_history.append(f"AI: {response}")
+                        chat_input = ""
+                elif symbol == key.ESCAPE:
+                    chat_active = False
+                    chat_input = ""
+                return  # Prevent other key processing while chat is active
+
             if symbol == key.Z:
                 current_zoom = "local" if current_zoom == "global" else "global"
                 update_ui_labels()
@@ -621,6 +618,11 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
             if symbol == key.ESCAPE:
                 game_state = "menu"
                 pyglet.clock.unschedule(update)
+                return
+            if symbol == key.A:
+                chat_active = not chat_active
+                if not chat_active:
+                    chat_input = ""
                 return
 
             # Player movement
@@ -649,7 +651,6 @@ create_T_shape(68, 30, width=10, height=3, rotation=0),
         grid_lines.append(shapes.Line(0, y, WINDOW_WIDTH, y, color=(50, 50, 50), batch=batch))
 
     pyglet.app.run()
-
 
 if __name__ == "__main__":
     run_sar_mission_game()
