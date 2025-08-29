@@ -114,10 +114,6 @@ class Game:
         self.rescue_pos = None
         self.rescue_reached = False
 
-        # Carry mechanic
-        self.carried_kind = None          # "red" | "purple" | "yellow" | None
-        self.carried_shape = None         # small circle drawn inside player
-
         # ----- GRID -----
         self.grid_lines = []
         world_w = PLAY_W * CELL_SIZE
@@ -163,11 +159,10 @@ class Game:
         self.victims_label = text.Label("", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-180, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
         self.player_label = text.Label("", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-200, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
         self.rescue_label = text.Label("", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-220, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
-        self.carried_label = text.Label("Carrying: —", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-240, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
 
         self.help_label = text.Label(
             "Start: ←/→ diff • ↑/↓ view • 1/2/3 • L/G • ENTER start | In-game: +/- zoom • G toggle • WASD/Arrows move",
-            x=PLAY_W_PX+20, y=WINDOW_HEIGHT-270, anchor_x='left',
+            x=PLAY_W_PX+20, y=WINDOW_HEIGHT-250, anchor_x='left',
             color=COLOR_TEXT, font_size=10, batch=self.ui_batch)
 
         # ----- Start screen overlay -----
@@ -194,7 +189,7 @@ class Game:
                                                          width=SIDEBAR_W-30, height=WINDOW_HEIGHT-320,
                                                          multiline=True, batch=self.ui_batch)
         self.chat_history_layout.x = PLAY_W_PX + 15
-        self.chat_history_layout.y = WINDOW_HEIGHT - 300
+        self.chat_history_layout.y = WINDOW_HEIGHT - 280
 
         self.input_doc = UnformattedDocument("")
         self.input_doc.set_style(0, 0, dict(color=(240,240,255,255), font_name="Arial", font_size=12))
@@ -248,13 +243,6 @@ class Game:
         if self.rescue_triangle:
             self.rescue_triangle.delete()
             self.rescue_triangle = None
-
-        # reset carry state
-        if self.carried_shape:
-            self.carried_shape.delete()
-            self.carried_shape = None
-        self.carried_kind = None
-        self.carried_label.text = "Carrying: —"
 
         # walls
         self.walls = self._generate_walls()
@@ -409,30 +397,6 @@ class Game:
     def _victim_color(self, kind):
         return COLOR_YELLOW if kind == "yellow" else (COLOR_PURPLE if kind == "purple" else COLOR_RED)
 
-    # ---- carry helpers ----
-    def _set_carried(self, kind: str):
-        """Begin carrying a victim of given kind; create/update inner circle."""
-        self.carried_kind = kind
-        cx = self.player_shape.x + CELL_SIZE / 2
-        cy = self.player_shape.y + CELL_SIZE / 2
-        if self.carried_shape is None:
-            self.carried_shape = shapes.Circle(
-                cx, cy, CELL_SIZE * 0.35,
-                color=self._victim_color(kind),
-                batch=self.play_batch
-            )
-        else:
-            self.carried_shape.color = self._victim_color(kind)
-            self.carried_shape.x = cx
-            self.carried_shape.y = cy
-            self.carried_shape.radius = CELL_SIZE * 0.35
-        self.carried_label.text = f"Carrying: {kind}"
-
-    def _update_carried_position(self):
-        if self.carried_shape:
-            self.carried_shape.x = self.player_shape.x + CELL_SIZE / 2
-            self.carried_shape.y = self.player_shape.y + CELL_SIZE / 2
-
     # ---------- projection (GLOBAL vs LOCAL with zoom) ----------
     def _set_play_viewport_and_projection(self):
         """Sub-viewport for the playfield + orthographic projection.
@@ -489,24 +453,17 @@ class Game:
     def _tick(self, dt):
         if self.game_state != "playing":
             return
-
-        # pick up / REPLACE behavior: old carried victim is deleted, new one picked up
+        # pick up victims
         pos = tuple(self.player)
         if pos in self.victims:
-            new_kind = self.victims[pos]
-            # remove the ground victim from world
             if pos in self.victim_shapes:
                 self.victim_shapes[pos][0].delete()
                 del self.victim_shapes[pos]
             del self.victims[pos]
-            # replace carried victim (old disappears)
-            self._set_carried(new_kind)
-
         # rescue detection
         if self.rescue_pos and tuple(self.player) == self.rescue_pos and not self.rescue_reached:
             self.rescue_reached = True
             self._append_chat_line("[SYSTEM] Rescue point reached! 🎯")
-
         # stats
         reds = sum(1 for k in self.victims.values() if k == "red")
         purples = sum(1 for k in self.victims.values() if k == "purple")
@@ -517,7 +474,6 @@ class Game:
         self.victims_label.text = f"Victims left (R/P/Y): {reds}/{purples}/{yellows}"
         self.player_label.text = f"Player: {self.player[0]},{self.player[1]}"
         self.rescue_label.text = f"Rescue: {rescue_txt}"
-        self.carried_label.text = f"Carrying: {self.carried_kind if self.carried_kind else '—'}"
 
         if self.time_remaining <= 0 and not self.game_over:
             self.game_over = True
@@ -528,7 +484,6 @@ class Game:
         self.player_shape.y = self.player[1] * CELL_SIZE
         self.player_shape.width = CELL_SIZE
         self.player_shape.height = CELL_SIZE
-        self._update_carried_position()
 
     def _second(self, dt):
         if self.game_state == "playing" and not self.game_over:

@@ -3,14 +3,14 @@ from collections import deque
 import pyglet
 from pyglet import shapes, text
 from pyglet.window import key, mouse
-from pyglet import gl  # for glViewport
+from pyglet import gl  # <-- for glViewport
 
 # =========================
 # Config
 # =========================
 WINDOW_WIDTH = 1600
 WINDOW_HEIGHT = 800
-CELL_SIZE = 20  # grid size
+CELL_SIZE = 20
 
 GRID_W = WINDOW_WIDTH // CELL_SIZE
 GRID_H = WINDOW_HEIGHT // CELL_SIZE
@@ -71,6 +71,9 @@ def clamp_grid(points):
             out.append((x, y))
     return set(out)
 
+def grid_to_px(gx, gy):
+    return gx * CELL_SIZE, gy * CELL_SIZE
+
 def bfs_distances(start, passable):
     q = deque([start])
     dist = {start: 0}
@@ -96,15 +99,15 @@ class Game:
 
         # ----- STATE -----
         self.game_state = "start"  # "start" -> "playing"
-        self.zoom = 1.0   # now used by camera projection
-        self.view_range = 2  # updated each frame based on view (local=2, global=5)
+        self.zoom = 1.0  # kept for label; projection now handles view, not CPU scaling
+        self.view_range = 2  # updated by projection setter
 
-        # Start-screen selections (defaults)
+        # Selections made on the start page (defaults)
         self._start_diffs = ["Easy", "Medium", "Hard"]
         self._start_diff_idx = 0
         self._start_view = "Local"  # or "Global"
 
-        # Active settings (after ENTER)
+        # Active (applied once Enter is pressed)
         self.difficulty = None
         self.view_mode = "local"   # "local" or "global"
 
@@ -114,32 +117,20 @@ class Game:
         self.rescue_pos = None
         self.rescue_reached = False
 
-        # Carry mechanic
-        self.carried_kind = None          # "red" | "purple" | "yellow" | None
-        self.carried_shape = None         # small circle drawn inside player
-
-        # ----- GRID -----
-        self.grid_lines = []
-        world_w = PLAY_W * CELL_SIZE
-        world_h = PLAY_H * CELL_SIZE
-        for gx in range(1, PLAY_W):  # verticals
-            x = gx * CELL_SIZE
-            self.grid_lines.append(
-                shapes.Line(x, 0, x, world_h, width=1, color=COLOR_GRID, batch=self.play_batch)
-            )
-        for gy in range(1, PLAY_H):  # horizontals
-            y = gy * CELL_SIZE
-            self.grid_lines.append(
-                shapes.Line(0, y, world_w, y, width=1, color=COLOR_GRID, batch=self.play_batch)
-            )
+        # grid lines
+        self.grid_v = [(shapes.Line(0,0,0,0,width=1,color=COLOR_GRID,batch=self.play_batch), gx)
+                         for gx in range(1, PLAY_W)]
+        self.grid_h = [(shapes.Line(0,0,0,0,width=1,color=COLOR_GRID,batch=self.play_batch), gy)
+                         for gy in range(1, PLAY_H)]
 
         # dynamic world drawables (built after difficulty chosen)
         self.wall_shapes = []
         self.victim_shapes = {}
-        self.player_shape = shapes.Rectangle(0, 0, CELL_SIZE, CELL_SIZE, color=COLOR_PLAYER, batch=self.play_batch)
+        self.player_shape = shapes.Rectangle(0, 0, 0, 0, color=COLOR_PLAYER, batch=self.play_batch)
 
         # rescue marker (triangle)
         self.rescue_triangle = None
+        self._rescue_cache = {"pos": None, "z": None}
 
         # ----- Sidebar panel -----
         self.panel_bg = shapes.Rectangle(PLAY_W_PX, 0, SIDEBAR_W, WINDOW_HEIGHT,
@@ -163,11 +154,10 @@ class Game:
         self.victims_label = text.Label("", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-180, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
         self.player_label = text.Label("", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-200, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
         self.rescue_label = text.Label("", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-220, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
-        self.carried_label = text.Label("Carrying: —", x=PLAY_W_PX+20, y=WINDOW_HEIGHT-240, anchor_x='left', color=COLOR_TEXT, font_size=12, batch=self.ui_batch)
 
         self.help_label = text.Label(
             "Start: ←/→ diff • ↑/↓ view • 1/2/3 • L/G • ENTER start | In-game: +/- zoom • G toggle • WASD/Arrows move",
-            x=PLAY_W_PX+20, y=WINDOW_HEIGHT-270, anchor_x='left',
+            x=PLAY_W_PX+20, y=WINDOW_HEIGHT-250, anchor_x='left',
             color=COLOR_TEXT, font_size=10, batch=self.ui_batch)
 
         # ----- Start screen overlay -----
@@ -194,7 +184,7 @@ class Game:
                                                          width=SIDEBAR_W-30, height=WINDOW_HEIGHT-320,
                                                          multiline=True, batch=self.ui_batch)
         self.chat_history_layout.x = PLAY_W_PX + 15
-        self.chat_history_layout.y = WINDOW_HEIGHT - 300
+        self.chat_history_layout.y = WINDOW_HEIGHT - 280
 
         self.input_doc = UnformattedDocument("")
         self.input_doc.set_style(0, 0, dict(color=(240,240,255,255), font_name="Arial", font_size=12))
@@ -229,12 +219,11 @@ class Game:
         self.view_mode = self._start_view.lower()
         self.view_label.text = f"View: {self._start_view}"
         self.view_range = 2 if self.view_mode == "local" else 5
-
         # Build world and switch state
         self._rebuild_world()
         self.game_state = "playing"
         self.status_label.text = ""       # clear hint
-        self.difficulty_label.text = ""   # keep difficulty hidden on HUD if desired
+        self.difficulty_label.text = ""   # keep difficulty hidden if you prefer
 
     # ---------- world (depends on difficulty) ----------
     def _rebuild_world(self):
@@ -248,13 +237,7 @@ class Game:
         if self.rescue_triangle:
             self.rescue_triangle.delete()
             self.rescue_triangle = None
-
-        # reset carry state
-        if self.carried_shape:
-            self.carried_shape.delete()
-            self.carried_shape = None
-        self.carried_kind = None
-        self.carried_label.text = "Carrying: —"
+        self._rescue_cache = {"pos": None, "z": None}
 
         # walls
         self.walls = self._generate_walls()
@@ -281,47 +264,25 @@ class Game:
             self.rescue_pos = START
         self.rescue_reached = False
 
-        # create drawables (pixel coords)
+        # create drawables
         for (gx, gy) in self.walls:
-            r = shapes.Rectangle(gx * CELL_SIZE, gy * CELL_SIZE, CELL_SIZE, CELL_SIZE,
-                                 color=COLOR_WALL, batch=self.play_batch)
+            r = shapes.Rectangle(gx * CELL_SIZE, gy * CELL_SIZE, CELL_SIZE, CELL_SIZE, color=COLOR_WALL, batch=self.play_batch)
             self.wall_shapes.append((r, gx, gy))
         for pos, kind in self.victims.items():
             gx, gy = pos
-            c = shapes.Circle(gx * CELL_SIZE + CELL_SIZE/2,
-                              gy * CELL_SIZE + CELL_SIZE/2,
+            c = shapes.Circle(gx * CELL_SIZE + CELL_SIZE/2, gy * CELL_SIZE + CELL_SIZE/2,
                               CELL_SIZE/2 - 3, color=self._victim_color(kind), batch=self.play_batch)
             self.victim_shapes[pos] = (c, kind)
 
-        # player sprite
+        # reset timers/player
+        self.time_remaining = TIME_LIMIT
         self.player = list(START)
+
+        # player drawable base size/pos
         self.player_shape.x = self.player[0] * CELL_SIZE
         self.player_shape.y = self.player[1] * CELL_SIZE
         self.player_shape.width = CELL_SIZE
         self.player_shape.height = CELL_SIZE
-
-        # rescue marker (fixed upright triangle)
-        self._create_or_update_rescue_triangle()
-
-        # timer
-        self.time_remaining = TIME_LIMIT
-
-    def _create_or_update_rescue_triangle(self):
-        if self.rescue_triangle:
-            self.rescue_triangle.delete()
-            self.rescue_triangle = None
-        if not self.rescue_pos:
-            return
-        gx, gy = self.rescue_pos
-        cx = gx * CELL_SIZE + CELL_SIZE / 2
-        cy = gy * CELL_SIZE + CELL_SIZE / 2
-        s = CELL_SIZE * 0.9
-        h = s * 0.5
-        x1, y1 = cx, cy + h   # top
-        x2, y2 = cx - s/2, cy - h
-        x3, y3 = cx + s/2, cy - h
-        self.rescue_triangle = shapes.Triangle(x1, y1, x2, y2, x3, y3,
-                                               color=COLOR_RESCUE, batch=self.play_batch)
 
     def _generate_walls(self):
         cfg = DIFFICULTIES[self.difficulty]
@@ -357,21 +318,23 @@ class Game:
         rng = random.Random(99)
         victims = {}
 
-        # Partition grid into quadrants to spread victims
+        # Partition grid into quadrants
         mid_x = PLAY_W // 2
         mid_y = PLAY_H // 2
-        quads = {"top_right": [], "top_left": [], "bottom_right": [], "bottom_left": []}
+        quadrants = {
+            "top_right":  [], "top_left":   [],
+            "bottom_right": [], "bottom_left":  []
+        }
 
         for pos, _dist in distmap.items():
-            if pos == START:
-                continue
+            if pos == START: continue
             qx = "left" if pos[0] < mid_x else "right"
             qy = "bottom" if pos[1] < mid_y else "top"
-            quads[f"{qy}_{qx}"].append(pos)
+            quadrants[f"{qy}_{qx}"].append(pos)
 
-        # Place some reds in harder cells per quadrant
+        # Select some reds from harder (farther) cells in each quadrant
         red_to_place = NUM_RED
-        for q_cells in quads.values():
+        for q_cells in quadrants.values():
             q_cells.sort(key=lambda p: distmap.get(p, 0), reverse=True)
             hard_cells = q_cells[:max(1, len(q_cells)//3)]
             num_in_quadrant = max(0, red_to_place // 4)
@@ -382,14 +345,12 @@ class Game:
                     hard_cells.remove(p)
                     distmap.pop(p, None)
 
-        # Fill remaining reds randomly among reachable cells
         while sum(1 for k in victims.values() if k == "red") < NUM_RED and distmap:
             candidate = rng.choice(list(distmap.keys()))
             if candidate not in victims:
                 victims[candidate] = "red"
                 distmap.pop(candidate, None)
 
-        # Now scatter purple and yellow
         remaining_candidates = [p for p in distmap.keys() if p not in victims and p != START]
         rng.shuffle(remaining_candidates)
 
@@ -398,9 +359,11 @@ class Game:
 
         for p in remaining_candidates:
             if purple_to_place > 0:
-                victims[p] = "purple"; purple_to_place -= 1
+                victims[p] = "purple"
+                purple_to_place -= 1
             elif yellow_to_place > 0:
-                victims[p] = "yellow"; yellow_to_place -= 1
+                victims[p] = "yellow"
+                yellow_to_place -= 1
             else:
                 break
 
@@ -409,77 +372,44 @@ class Game:
     def _victim_color(self, kind):
         return COLOR_YELLOW if kind == "yellow" else (COLOR_PURPLE if kind == "purple" else COLOR_RED)
 
-    # ---- carry helpers ----
-    def _set_carried(self, kind: str):
-        """Begin carrying a victim of given kind; create/update inner circle."""
-        self.carried_kind = kind
-        cx = self.player_shape.x + CELL_SIZE / 2
-        cy = self.player_shape.y + CELL_SIZE / 2
-        if self.carried_shape is None:
-            self.carried_shape = shapes.Circle(
-                cx, cy, CELL_SIZE * 0.35,
-                color=self._victim_color(kind),
-                batch=self.play_batch
-            )
-        else:
-            self.carried_shape.color = self._victim_color(kind)
-            self.carried_shape.x = cx
-            self.carried_shape.y = cy
-            self.carried_shape.radius = CELL_SIZE * 0.35
-        self.carried_label.text = f"Carrying: {kind}"
-
-    def _update_carried_position(self):
-        if self.carried_shape:
-            self.carried_shape.x = self.player_shape.x + CELL_SIZE / 2
-            self.carried_shape.y = self.player_shape.y + CELL_SIZE / 2
-
-    # ---------- projection (GLOBAL vs LOCAL with zoom) ----------
+    # ---------- projection (GLOBAL vs LOCAL 5×5) ----------
     def _set_play_viewport_and_projection(self):
-        """Sub-viewport for the playfield + orthographic projection.
-           - Global: full-map window scaled by zoom, centered on player
-           - Local: 5×5 base window scaled by zoom, centered on player
-           Zoom: 0.25–1.5 (clamped)
+        """Sets a sub-viewport for the playfield and an ortho projection.
+           - Global: full map
+           - Local: centered 5×5 window on the player
         """
-        # Limit drawing to the play area on the left
+        # 1) Limit drawing to the play area on the left
         gl.glViewport(0, 0, PLAY_W_PX, WINDOW_HEIGHT)
 
         world_w = PLAY_W * CELL_SIZE
         world_h = PLAY_H * CELL_SIZE
 
-        z = max(MIN_ZOOM, min(MAX_ZOOM, self.zoom))
-
-        # center on player (pixel coords)
-        cx = (self.player[0] + 0.5) * CELL_SIZE
-        cy = (self.player[1] + 0.5) * CELL_SIZE
-
         if self.view_mode == "global":
-            # base is whole world; zoom >1 => zoom in, zoom <1 => try to zoom out (clamped to world)
-            w = min(world_w, world_w / z)
-            h = min(world_h, world_h / z)
+            # full-map ortho projection
+            left, right = 0.0, float(world_w)
+            bottom, top = 0.0, float(world_h)
+            self.view_range = 5
         else:
-            # base is a 5×5 window; zoom >1 => tighter; zoom <1 => looser
-            base_w = 5 * CELL_SIZE
-            base_h = 5 * CELL_SIZE
-            w = base_w / z
-            h = base_h / z
-            # never exceed world
-            w = min(w, world_w)
-            h = min(h, world_h)
+            # local: 5×5 window centered on player (in pixels)
+            zoom_w = 5 * CELL_SIZE
+            zoom_h = 5 * CELL_SIZE
+            cx = (self.player[0] + 0.5) * CELL_SIZE
+            cy = (self.player[1] + 0.5) * CELL_SIZE
 
-        left = max(0.0, min(cx - w / 2.0, world_w - w))
-        bottom = max(0.0, min(cy - h / 2.0, world_h - h))
-        right = left + w
-        top = bottom + h
-
-        # view_range remains per mode (as you requested)
-        self.view_range = 2 if self.view_mode == "local" else 5
+            left = max(0.0, min(cx - zoom_w/2, world_w - zoom_w))
+            bottom = max(0.0, min(cy - zoom_h/2, world_h - zoom_h))
+            right = left + zoom_w
+            top = bottom + zoom_h
+            self.view_range = 2
 
         self.window.projection = pyglet.math.Mat4.orthogonal_projection(
             left, right, bottom, top, -1.0, 1.0
         )
 
     def _reset_full_window_projection(self):
-        """Restore full-window viewport and pixel-ortho for the UI/overlays."""
+        """Restore full-window viewport and a standard pixel-orthographic proj
+           for drawing the UI / start overlay.
+        """
         gl.glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
         self.window.projection = pyglet.math.Mat4.orthogonal_projection(
             0.0, float(WINDOW_WIDTH), 0.0, float(WINDOW_HEIGHT), -1.0, 1.0
@@ -489,24 +419,17 @@ class Game:
     def _tick(self, dt):
         if self.game_state != "playing":
             return
-
-        # pick up / REPLACE behavior: old carried victim is deleted, new one picked up
+        # pick up victims
         pos = tuple(self.player)
         if pos in self.victims:
-            new_kind = self.victims[pos]
-            # remove the ground victim from world
             if pos in self.victim_shapes:
                 self.victim_shapes[pos][0].delete()
                 del self.victim_shapes[pos]
             del self.victims[pos]
-            # replace carried victim (old disappears)
-            self._set_carried(new_kind)
-
         # rescue detection
         if self.rescue_pos and tuple(self.player) == self.rescue_pos and not self.rescue_reached:
             self.rescue_reached = True
             self._append_chat_line("[SYSTEM] Rescue point reached! 🎯")
-
         # stats
         reds = sum(1 for k in self.victims.values() if k == "red")
         purples = sum(1 for k in self.victims.values() if k == "purple")
@@ -517,7 +440,6 @@ class Game:
         self.victims_label.text = f"Victims left (R/P/Y): {reds}/{purples}/{yellows}"
         self.player_label.text = f"Player: {self.player[0]},{self.player[1]}"
         self.rescue_label.text = f"Rescue: {rescue_txt}"
-        self.carried_label.text = f"Carrying: {self.carried_kind if self.carried_kind else '—'}"
 
         if self.time_remaining <= 0 and not self.game_over:
             self.game_over = True
@@ -528,7 +450,6 @@ class Game:
         self.player_shape.y = self.player[1] * CELL_SIZE
         self.player_shape.width = CELL_SIZE
         self.player_shape.height = CELL_SIZE
-        self._update_carried_position()
 
     def _second(self, dt):
         if self.game_state == "playing" and not self.game_over:
@@ -558,15 +479,15 @@ class Game:
         self.window.clear()
         pyglet.gl.glClearColor(COLOR_BG[0]/255.0, COLOR_BG[1]/255.0, COLOR_BG[2]/255.0, 1.0)
 
-        # 1) Playfield viewport+projection (GLOBAL/LOCAL with zoom)
+        # 1) Set playfield viewport+projection (GLOBAL or 5×5 LOCAL)
         self._set_play_viewport_and_projection()
         self.play_batch.draw()
 
-        # 2) Reset for UI / overlays
+        # 2) Reset to full window for UI / overlays
         self._reset_full_window_projection()
         self.ui_batch.draw()
 
-        # Start overlay
+        # draw start overlay only while in "start"
         if self.game_state == "start":
             self.start_title.draw()
             self.start_diff_label.draw()
@@ -601,7 +522,7 @@ class Game:
                 self._apply_start_selection_and_begin()
                 return
 
-            # optional preview zoom on start (updates label)
+            # (Optional) preview zoom label only; projection owns the actual view
             if symbol in (key.EQUAL, key.NUM_ADD):
                 self.zoom = min(MAX_ZOOM, self.zoom + ZOOM_STEP); return
             if symbol in (key.MINUS, key.NUM_SUBTRACT):
@@ -609,18 +530,21 @@ class Game:
             return
 
         # ----- IN-GAME CONTROLS -----
+        # Zoom keys now only update the label; local is fixed 5×5 via projection
         if symbol in (key.EQUAL, key.NUM_ADD):
-            self.zoom = min(MAX_ZOOM, self.zoom + ZOOM_STEP)
+            if self.view_mode == "local":
+                self.zoom = min(MAX_ZOOM, self.zoom + ZOOM_STEP)
             return
         if symbol in (key.MINUS, key.NUM_SUBTRACT):
-            self.zoom = max(MIN_ZOOM, self.zoom - ZOOM_STEP)
+            if self.view_mode == "local":
+                self.zoom = max(MIN_ZOOM, self.zoom - ZOOM_STEP)
             return
 
         # Toggle view mode
         if symbol == key.G:
             self.view_mode = "global" if self.view_mode == "local" else "local"
             self.view_label.text = f"View: {self.view_mode.capitalize()}"
-            # keep zoom as-is; view_range remains per mode
+            self.view_range = 2 if self.view_mode == "local" else 5
             return
 
         if symbol in (key.LEFT, key.A): self._move(-1, 0); return

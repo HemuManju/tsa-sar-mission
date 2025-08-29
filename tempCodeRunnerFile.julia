@@ -1,0 +1,620 @@
+
+import pyglet
+from pyglet import shapes, text
+from pyglet.window import key
+from collections import deque
+
+# =========================
+# Config
+# =========================
+WINDOW_WIDTH = 1600
+WINDOW_HEIGHT = 800
+CELL_SIZE = 20
+GRID_W = WINDOW_WIDTH // CELL_SIZE   # 80
+GRID_H = WINDOW_HEIGHT // CELL_SIZE  # 40
+
+SIDEBAR_W = 360                      # Right-side UI panel
+PLAY_W_PX = WINDOW_WIDTH - SIDEBAR_W # drawable grid width in px
+PLAY_W = PLAY_W_PX // CELL_SIZE      # columns dedicated to play area
+PLAY_H = GRID_H
+
+TIME_LIMIT = 300  # seconds
+
+# Colors
+COLOR_BG = (22, 24, 28)
+COLOR_GRID = (55, 60, 70)
+COLOR_WALL = (90, 100, 115)
+COLOR_PLAYER = (60, 200, 255)
+COLOR_RESCUE = (255, 220, 60)
+
+COLOR_PANEL = (10, 10, 14, 220)
+COLOR_PANEL_BORDER = (140, 100, 220)
+COLOR_TEXT = (230, 230, 240, 255)
+COLOR_PURPLE = (190, 140, 255, 255)
+
+# =========================
+# Helper: shape generators
+# (return sets of (gx, gy) grid coords)
+# These are simple but effective; rotations 0..3
+# =========================
+def clamp_grid(points):
+    out = []
+    for x, y in points:
+        if 0 <= x < PLAY_W and 0 <= y < PLAY_H:
+            out.append((x, y))
+    return set(out)
+
+def rotate_points(points, origin, r):
+    # rotate 90*r degrees around origin (integer grid)
+    ox, oy = origin
+    res = []
+    for x, y in points:
+        dx, dy = x - ox, y - oy
+        if r % 4 == 0:
+            rx, ry = ox + dx, oy + dy
+        elif r % 4 == 1:
+            rx, ry = ox - dy, oy + dx
+        elif r % 4 == 2:
+            rx, ry = ox - dx, oy - dy
+        else:
+            rx, ry = ox + dy, oy - dx
+        res.append((rx, ry))
+    return res
+
+def line_h(x, y, w):
+    return [(x + i, y) for i in range(max(1, w))]
+
+def line_v(x, y, h):
+    return [(x, y + i) for i in range(max(1, h))]
+
+def create_rect(x, y, width, height):
+    pts = []
+    for dx in range(max(1, width)):
+        for dy in range(max(1, height)):
+            pts.append((x + dx, y + dy))
+    return clamp_grid(pts)
+
+def create_L_shape(x, y, size=5, rotation=0):
+    size = max(2, size)
+    core = line_h(x, y, size) + line_v(x, y, size)
+    pts = rotate_points(core, (x, y), rotation)
+    return clamp_grid(pts)
+
+def create_U_shape(x, y, width=7, height=4, rotation=0):
+    width = max(3, width)
+    height = max(3, height)
+    pts = []
+    pts += line_v(x, y, height)                       # left leg
+    pts += line_v(x + width - 1, y, height)           # right leg
+    pts += line_h(x, y, width)                        # base
+    # hollow middle (no fill) -> keep contour only
+    pts = list(set(pts))
+    pts = rotate_points(pts, (x, y), rotation)
+    return clamp_grid(pts)
+
+def create_T_shape(x, y, width=7, height=4, rotation=0):
+    width = max(3, width | 1)  # force odd for centered stem
+    height = max(2, height)
+    top = line_h(x, y, width)
+    stem_x = x + width // 2
+    stem = line_v(stem_x, y, height)
+    pts = list(set(top + stem))
+    pts = rotate_points(pts, (x, y), rotation)
+    return clamp_grid(pts)
+
+# For M/W we’ll make readable “zig” blocks (good for maze-like walls)
+def create_M_shape(x, y, width=7, height=4, rotation=0):
+    width = max(5, width)
+    height = max(3, height)
+    pts = []
+    # two legs with a central vee (M-like outline)
+    pts += line_v(x, y, height)
+    pts += line_v(x + width - 1, y, height)
+    mid = x + width // 2
+    pts += line_v(mid, y + 1, height - 1)
+    pts += line_h(x, y, width)  # top line
+    pts = list(set(pts))
+    pts = rotate_points(pts, (x, y), rotation)
+    return clamp_grid(pts)
+
+def create_W_shape(x, y, width=7, height=4, rotation=0):
+    width = max(5, width)
+    height = max(3, height)
+    pts = []
+    # W-like zig columns
+    cols = [x, x + width // 3, x + (2 * width) // 3, x + width - 1]
+    rows = [y + height - 1, y]
+    for i, cx in enumerate(cols):
+        target_row = rows[i % 2]
+        pts += line_v(cx, min(y, target_row), abs(target_row - y) + 1)
+    pts = list(set(pts))
+    pts = rotate_points(pts, (x, y), rotation)
+    return clamp_grid(pts)
+
+# =========================
+# Build wall sets by difficulty
+# (Uses your lists exactly)
+# =========================
+def build_walls(difficulty):
+    configs = {
+        'easy': [
+            create_L_shape(5, 5, size=5, rotation=0),
+            create_L_shape(40, 18, size=4, rotation=2),
+            create_L_shape(2, 12, size=6, rotation=1),
+            create_U_shape(10, 15, width=7, height=4, rotation=1),
+            create_U_shape(25, 2, width=5, height=5, rotation=0),
+            create_U_shape(38, 5, width=4, height=6, rotation=3),
+            create_T_shape(15, 8, width=5, height=4, rotation=2),
+            create_T_shape(30, 20, width=7, height=3, rotation=0),
+            create_T_shape(22, 12, width=5, height=5, rotation=1),
+            create_M_shape(8, 2, width=5, height=4, rotation=0),
+            create_M_shape(33, 15, width=7, height=5, rotation=1),
+            create_M_shape(18, 20, width=5, height=4, rotation=2),
+            create_W_shape(2, 20, width=5, height=4, rotation=0),
+            create_W_shape(40, 2, width=5, height=4, rotation=3),
+            create_W_shape(28, 8, width=7, height=4, rotation=0),
+            create_W_shape(78, 28, width=4, height=4, rotation=3),
+            create_L_shape(72, 32, size=6, rotation=2),
+            create_U_shape(75, 36, width=5, height=6, rotation=1),
+            create_T_shape(77, 26, width=6, height=4, rotation=0),
+            create_M_shape(73, 14, width=5, height=4, rotation=2),
+            create_W_shape(71, 20, width=5, height=3, rotation=0),
+            create_W_shape(30, 34, width=5, height=4, rotation=3),
+            create_L_shape(35, 28, size=5, rotation=0),
+            create_U_shape(40, 32, width=6, height=4, rotation=1),
+            create_T_shape(45, 36, width=7, height=5, rotation=2),
+            create_M_shape(50, 30, width=5, height=4, rotation=0),
+            create_W_shape(55, 34, width=4, height=3, rotation=3),
+            create_W_shape(48, 12, width=5, height=4, rotation=1),
+            create_L_shape(34, 20, size=6, rotation=2),
+            create_U_shape(38, 10, width=5, height=5, rotation=0),
+            create_T_shape(42, 16, width=6, height=4, rotation=3),
+            create_M_shape(46, 14, width=5, height=4, rotation=2),
+            create_W_shape(50, 18, width=4, height=4, rotation=0),
+            create_U_shape(65, 5,  width=3, height=12, rotation=0),
+            create_U_shape(70, 10, width=3, height=15, rotation=0),
+            create_U_shape(75, 20, width=2, height=10, rotation=0),
+            create_T_shape(61, 8,  width=9,  height=3, rotation=0),
+            create_T_shape(66, 16, width=11, height=3, rotation=0),
+            create_T_shape(62, 24, width=8,  height=3, rotation=0),
+            create_T_shape(68, 30, width=10, height=3, rotation=0),
+            create_M_shape(63, 18, width=7, height=4, rotation=0),
+            create_W_shape(71, 32, width=6, height=4, rotation=3),
+        ],
+        'medium': [
+            create_L_shape(4, 4, size=7, rotation=1),
+            create_L_shape(38, 15, size=5, rotation=2),
+            create_L_shape(2, 15, size=6, rotation=2),
+            create_L_shape(12, 20, size=5, rotation=3),
+            create_U_shape(15, 18, width=6, height=5, rotation=0),
+            create_U_shape(25, 2, width=5, height=6, rotation=2),
+            create_U_shape(40, 10, width=4, height=6, rotation=3),
+            create_U_shape(8, 8, width=7, height=4, rotation=1),
+            create_T_shape(30, 5, width=9, height=4, rotation=3),
+            create_T_shape(10, 10, width=7, height=4, rotation=0),
+            create_T_shape(20, 22, width=9, height=3, rotation=0),
+            create_T_shape(35, 2, width=5, height=5, rotation=2),
+            create_M_shape(2, 2, width=5, height=4, rotation=0),
+            create_M_shape(40, 20, width=5, height=4, rotation=2),
+            create_M_shape(25, 15, width=7, height=5, rotation=1),
+            create_M_shape(18, 5, width=5, height=4, rotation=3),
+            create_W_shape(20, 10, width=7, height=4, rotation=0),
+            create_W_shape(33, 18, width=5, height=4, rotation=1),
+            create_W_shape(5, 20, width=5, height=4, rotation=0),
+            create_W_shape(42, 5, width=3, height=3, rotation=3),
+            create_L_shape(72, 8, size=5, rotation=0),
+            create_U_shape(74, 12, width=6, height=5, rotation=1),
+            create_T_shape(76, 18, width=5, height=4, rotation=2),
+            create_M_shape(70, 22, width=5, height=3, rotation=0),
+            create_W_shape(78, 28, width=4, height=4, rotation=3),
+            create_L_shape(10, 28, size=6, rotation=3),
+            create_U_shape(15, 32, width=7, height=5, rotation=0),
+            create_T_shape(20, 36, width=8, height=4, rotation=1),
+            create_M_shape(25, 30, width=6, height=3, rotation=2),
+            create_W_shape(30, 34, width=5, height=4, rotation=3),
+            create_L_shape(32, 12, size=5, rotation=1),
+            create_U_shape(36, 16, width=6, height=4, rotation=2),
+            create_T_shape(40, 14, width=7, height=5, rotation=0),
+            create_M_shape(44, 18, width=6, height=3, rotation=3),
+            create_W_shape(48, 12, width=5, height=4, rotation=1),
+            create_U_shape(65, 5,  width=3, height=12, rotation=0),
+            create_U_shape(70, 10, width=3, height=15, rotation=0),
+            create_U_shape(75, 20, width=2, height=10, rotation=0),
+            create_T_shape(62, 8,  width=10, height=3, rotation=0),
+            create_T_shape(66, 18, width=12, height=3, rotation=0),
+            create_T_shape(68, 28, width=14, height=3, rotation=0),
+            create_W_shape(50, 18, width=4, height=4, rotation=0),
+            create_T_shape(61, 8,  width=9,  height=3, rotation=0),
+            create_T_shape(66, 16, width=11, height=2, rotation=0),
+            create_T_shape(62, 24, width=8,  height=3, rotation=0),
+            create_T_shape(68, 30, width=10, height=6, rotation=0),
+            create_M_shape(63, 18, width=7, height=4, rotation=0),
+            create_W_shape(71, 32, width=6, height=4, rotation=3),
+        ],
+        'hard': [
+            create_L_shape(3, 3, size=8, rotation=0),
+            create_L_shape(35, 2, size=6, rotation=3),
+            create_L_shape(40, 20, size=4, rotation=2),
+            create_L_shape(18, 2, size=7, rotation=1),
+            create_L_shape(42, 8, size=5, rotation=0),
+            create_L_shape(10, 18, size=6, rotation=2),
+            create_L_shape(2, 22, size=4, rotation=1),
+            create_U_shape(12, 12, width=5, height=8, rotation=1),
+            create_U_shape(20, 5, width=7, height=4, rotation=2),
+            create_U_shape(30, 12, width=6, height=6, rotation=0),
+            create_U_shape(2, 8, width=4, height=7, rotation=3),
+            create_U_shape(42, 2, width=3, height=5, rotation=2),
+            create_U_shape(25, 22, width=8, height=3, rotation=0),
+            create_T_shape(25, 18, width=10, height=5, rotation=0),
+            create_T_shape(8, 20, width=6, height=4, rotation=1),
+            create_T_shape(2, 10, width=8, height=5, rotation=3),
+            create_T_shape(38, 8, width=5, height=6, rotation=2),
+            create_T_shape(15, 2, width=7, height=4, rotation=0),
+            create_T_shape(28, 5, width=5, height=5, rotation=1),
+            create_M_shape(6, 2, width=5, height=4, rotation=0),
+            create_M_shape(40, 15, width=5, height=5, rotation=2),
+            create_M_shape(15, 22, width=7, height=3, rotation=0),
+            create_M_shape(33, 20, width=5, height=4, rotation=1),
+            create_M_shape(22, 2, width=5, height=4, rotation=3),
+            create_W_shape(2, 15, width=5, height=4, rotation=0),
+            create_W_shape(42, 18, width=3, height=3, rotation=2),
+            create_W_shape(30, 2, width=7, height=4, rotation=0),
+            create_W_shape(20, 15, width=5, height=5, rotation=1),
+            create_W_shape(8, 8, width=5, height=4, rotation=3),
+            create_W_shape(35, 15, width=5, height=4, rotation=0),
+            create_T_shape(22, 12, width=7, height=4, rotation=0),
+            create_L_shape(25, 15, size=5, rotation=3),
+            create_U_shape(18, 10, width=5, height=4, rotation=2),
+            create_T_shape(45, 22, width=7, height=4, rotation=1),
+            create_L_shape(50, 5, size=6, rotation=0),
+            create_U_shape(55, 10, width=6, height=5, rotation=2),
+            create_M_shape(60, 12, width=5, height=4, rotation=1),
+            create_W_shape(65, 18, width=5, height=4, rotation=0),
+            create_L_shape(70, 6, size=5, rotation=2),
+            create_T_shape(72, 24, width=6, height=4, rotation=3),
+            create_U_shape(48, 28, width=5, height=5, rotation=0),
+            create_M_shape(52, 30, width=6, height=3, rotation=2),
+            create_W_shape(58, 32, width=4, height=3, rotation=1),
+            create_L_shape(62, 26, size=4, rotation=3),
+            create_T_shape(68, 14, width=8, height=4, rotation=0),
+            create_U_shape(74, 20, width=4, height=6, rotation=1),
+            create_M_shape(76, 8, width=5, height=4, rotation=0),
+            create_W_shape(44, 34, width=6, height=3, rotation=2),
+            create_L_shape(28, 28, size=6, rotation=1),
+            create_T_shape(10, 26, width=7, height=4, rotation=2),
+            create_L_shape(12, 28, size=5, rotation=0),
+            create_U_shape(18, 30, width=6, height=4, rotation=2),
+            create_T_shape(24, 32, width=7, height=4, rotation=1),
+            create_M_shape(30, 34, width=5, height=4, rotation=3),
+            create_W_shape(36, 36, width=6, height=3, rotation=0),
+            create_L_shape(42, 30, size=6, rotation=2),
+            create_U_shape(48, 24, width=5, height=5, rotation=1),
+            create_T_shape(54, 18, width=8, height=4, rotation=0),
+            create_M_shape(60, 12, width=5, height=3, rotation=2),
+            create_W_shape(66, 6, width=4, height=4, rotation=3),
+            create_L_shape(72, 5, size=6, rotation=1),
+            create_U_shape(74, 10, width=5, height=6, rotation=0),
+            create_T_shape(76, 15, width=6, height=4, rotation=2),
+            create_M_shape(70, 20, width=5, height=4, rotation=3),
+            create_W_shape(78, 25, width=4, height=4, rotation=1),
+            create_T_shape(61, 8,  width=9,  height=3, rotation=0),
+            create_T_shape(66, 16, width=11, height=3, rotation=0),
+            create_T_shape(62, 24, width=8,  height=3, rotation=0),
+            create_T_shape(68, 30, width=10, height=3, rotation=0),
+        ]
+    }
+    walls = set()
+    # Border walls around play area
+    for x in range(PLAY_W):
+        walls.add((x, 0))
+        walls.add((x, PLAY_H - 1))
+    for y in range(PLAY_H):
+        walls.add((0, y))
+        walls.add((PLAY_W - 1, y))
+    # Add selected configs
+    for s in configs[difficulty]:
+        walls |= s
+    return walls
+
+# =========================
+# BFS to farthest reachable tile
+# =========================
+def farthest_reachable(start, blocked):
+    sx, sy = start
+    q = deque([(sx, sy, 0)])
+    seen = {(sx, sy): 0}
+    dirs = [(1,0),(-1,0),(0,1),(0,-1)]
+    best = (sx, sy, 0)
+    while q:
+        x, y, d = q.popleft()
+        if d > best[2]:
+            best = (x, y, d)
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < PLAY_W and 0 <= ny < PLAY_H):
+                continue
+            if (nx, ny) in blocked:
+                continue
+            if (nx, ny) not in seen:
+                seen[(nx, ny)] = d + 1
+                q.append((nx, ny, d + 1))
+    return (best[0], best[1])
+
+# =========================
+# Game Class
+# =========================
+class SARGame:
+    def __init__(self):
+        self.window = pyglet.window.Window(WINDOW_WIDTH, WINDOW_HEIGHT, "SAR Mission")
+        self.batch = pyglet.graphics.Batch()
+        self.ui_batch = pyglet.graphics.Batch()
+        self.overlay_batch = pyglet.graphics.Batch()
+
+        self.game_state = "menu"
+        self.difficulty = None
+
+        self.player = (2, 2)
+        self.start_pos = (2, 2)
+        self.rescue = None
+        self.time_left = TIME_LIMIT
+
+        # Walls + drawables
+        self.walls = set()
+        self.wall_rects = []
+
+        # UI panes
+        self.sidebar_bg = shapes.BorderedRectangle(
+            x=WINDOW_WIDTH - SIDEBAR_W + 10, y=10,
+            width=SIDEBAR_W - 20, height=WINDOW_HEIGHT - 20,
+            border=2, color=(0,0,0), border_color=COLOR_PANEL_BORDER, batch=self.ui_batch
+        )
+        self.sidebar_bg.opacity = COLOR_PANEL[3]
+
+        # HUD texts (positions chosen to avoid overlap)
+        sx = WINDOW_WIDTH - SIDEBAR_W + 30
+        top_y = WINDOW_HEIGHT - 60
+        self.title = text.Label("SAR Mission", font_name="Arial", font_size=20,
+                                x=sx, y=top_y, color=COLOR_TEXT, batch=self.ui_batch)
+        self.hud_timer = text.Label("Time: 300", font_name="Arial", font_size=16,
+                                    x=sx, y=top_y-30, color=COLOR_TEXT, batch=self.ui_batch)
+        self.hud_diff  = text.Label("Difficulty: -", font_name="Arial", font_size=14,
+                                    x=sx, y=top_y-55, color=COLOR_TEXT, batch=self.ui_batch)
+        self.hud_pos   = text.Label("Pos: (2,2)", font_name="Arial", font_size=14,
+                                    x=sx, y=top_y-80, color=COLOR_TEXT, batch=self.ui_batch)
+        self.hud_goal  = text.Label("Goal: Reach the triangle", font_name="Arial", font_size=14,
+                                    x=sx, y=top_y-105, color=COLOR_TEXT, batch=self.ui_batch)
+
+        # Chat box
+        self.chat_active = False
+        self.chat_history = []  # list of strings
+        self.chat_input = ""
+        self.chat_bg = shapes.BorderedRectangle(
+            x=WINDOW_WIDTH - SIDEBAR_W + 20, y=30,
+            width=SIDEBAR_W - 40, height=220,
+            border=2, color=(0,0,0), border_color=COLOR_PANEL_BORDER, batch=self.ui_batch
+        )
+        self.chat_bg.opacity = 230
+        self.chat_title = text.Label("Chat", font_name="Arial", font_size=14,
+                                     x=self.chat_bg.x + 10, y=self.chat_bg.y + self.chat_bg.height - 24,
+                                     color=COLOR_PURPLE, batch=self.ui_batch)
+        self.chat_lines = []
+        for i in range(6):
+            lbl = text.Label("", font_name="Arial", font_size=12,
+                             x=self.chat_bg.x + 10, y=self.chat_bg.y + self.chat_bg.height - 50 - i*22,
+                             color=COLOR_PURPLE, batch=self.ui_batch)
+            self.chat_lines.append(lbl)
+        self.chat_prompt = text.Label("> ", font_name="Arial", font_size=12,
+                                      x=self.chat_bg.x + 10, y=self.chat_bg.y + 12,
+                                      color=COLOR_PURPLE, batch=self.ui_batch)
+        self.chat_input_label = text.Label("", font_name="Arial", font_size=12,
+                                           x=self.chat_bg.x + 28, y=self.chat_bg.y + 12,
+                                           color=COLOR_PURPLE, batch=self.ui_batch)
+        self.chat_hint = text.Label("Press C to type, Enter to send",
+                                    font_name="Arial", font_size=10,
+                                    x=self.chat_bg.x + 10, y=self.chat_bg.y - 14,
+                                    color=COLOR_TEXT, batch=self.ui_batch)
+
+        # Event hooks
+        self.window.push_handlers(on_draw=self.on_draw,
+                                  on_key_press=self.on_key_press,
+                                  on_text=self.on_text)
+
+        pyglet.clock.schedule_interval(self.update_timer, 1.0)
+
+        # Menu overlay
+        self.menu_title = text.Label("Choose Difficulty: 1=Easy  2=Medium  3=Hard",
+                                     font_name="Arial", font_size=22,
+                                     x=WINDOW_WIDTH//2, y=WINDOW_HEIGHT//2 + 40,
+                                     anchor_x='center', anchor_y='center',
+                                     color=COLOR_TEXT, batch=self.overlay_batch)
+        self.menu_hint = text.Label("Move with Arrow Keys. Reach the triangle to win.",
+                                    font_name="Arial", font_size=14,
+                                    x=WINDOW_WIDTH//2, y=WINDOW_HEIGHT//2 - 10,
+                                    anchor_x='center', anchor_y='center',
+                                    color=COLOR_TEXT, batch=self.overlay_batch)
+
+        # Grid lines (play area only)
+        self.grid_lines = []
+        for gx in range(0, PLAY_W + 1):
+            x = gx * CELL_SIZE
+            self.grid_lines.append(shapes.Line(x, 0, x, PLAY_H * CELL_SIZE, 1, COLOR_GRID, batch=self.batch))
+        for gy in range(0, PLAY_H + 1):
+            y = gy * CELL_SIZE
+            self.grid_lines.append(shapes.Line(0, y, PLAY_W * CELL_SIZE, y, 1, COLOR_GRID, batch=self.batch))
+
+        # Player drawable
+        self.player_shape = shapes.Rectangle(0, 0, CELL_SIZE, CELL_SIZE, color=COLOR_PLAYER, batch=self.batch)
+
+        # Rescue drawable (triangle)
+        self.rescue_shape = None
+
+    # -------- world setup --------
+    def start_game(self, difficulty):
+        self.difficulty = difficulty
+        self.hud_diff.text = f"Difficulty: {difficulty.title()}"
+        self.walls = build_walls(difficulty)
+        # ensure start is free
+        self.start_pos = (2, 2)
+        if self.start_pos in self.walls:
+            # find nearest free
+            for r in range(1, 10):
+                candidates = [(2+r,2),(2,2+r),(2+r,2+r)]
+                for c in candidates:
+                    if c not in self.walls and 0 <= c[0] < PLAY_W and 0 <= c[1] < PLAY_H:
+                        self.start_pos = c
+                        break
+                else:
+                    continue
+                break
+        self.player = self.start_pos
+        self.time_left = TIME_LIMIT
+        self.game_state = "playing"
+        self.rebuild_wall_rects()
+        self.place_rescue()
+
+    def rebuild_wall_rects(self):
+        # clear old
+        self.wall_rects = []
+        for (gx, gy) in self.walls:
+            x, y = gx * CELL_SIZE, gy * CELL_SIZE
+            self.wall_rects.append(shapes.Rectangle(x, y, CELL_SIZE, CELL_SIZE, color=COLOR_WALL, batch=self.batch))
+
+    def place_rescue(self):
+        goal = farthest_reachable(self.start_pos, self.walls)
+        self.rescue = goal
+        # build triangle shape
+        if self.rescue_shape:
+            self.rescue_shape.delete()
+            self.rescue_shape = None
+        rx, ry = self.rescue
+        px = rx * CELL_SIZE
+        py = ry * CELL_SIZE
+        tri = shapes.Triangle(px + CELL_SIZE//2, py + CELL_SIZE - 2,
+                              px + 2, py + 2,
+                              px + CELL_SIZE - 2, py + 2,
+                              color=COLOR_RESCUE, batch=self.batch)
+        self.rescue_shape = tri
+
+    # -------- draw --------
+    def on_draw(self):
+        self.window.clear()
+        pyglet.gl.glClearColor(*(c/255.0 for c in COLOR_BG + (255,)))
+        # Draw world
+        self.batch.draw()
+        # Draw player
+        self.update_player_shape()
+        # Draw UI
+        self.update_hud()
+        self.ui_batch.draw()
+        # Menu overlay
+        if self.game_state == "menu":
+            self.overlay_batch.draw()
+        elif self.game_state == "victory":
+            self.draw_center_text("Rescue point reached! You win 🎉  (Press R to restart)")
+        elif self.game_state == "timeout":
+            self.draw_center_text("Time's up!  (Press R to restart)")
+
+    def draw_center_text(self, s):
+        lbl = text.Label(s, font_name="Arial", font_size=22,
+                         x=WINDOW_WIDTH//2, y=WINDOW_HEIGHT//2,
+                         anchor_x='center', anchor_y='center',
+                         color=COLOR_TEXT)
+        lbl.draw()
+
+    def update_player_shape(self):
+        gx, gy = self.player
+        self.player_shape.x = gx * CELL_SIZE
+        self.player_shape.y = gy * CELL_SIZE
+
+    def update_hud(self):
+        self.hud_timer.text = f"Time: {self.time_left}"
+        self.hud_pos.text = f"Pos: {self.player}"
+        # update chat visible lines
+        max_lines = len(self.chat_lines)
+        view = self.chat_history[-max_lines:]
+        for i, lbl in enumerate(self.chat_lines):
+            lbl.text = view[i] if i < len(view) else ""
+        # input field
+        caret = "|" if self.chat_active else ""
+        self.chat_input_label.text = self.chat_input + caret
+
+    # -------- input --------
+    def on_key_press(self, symbol, modifiers):
+        if self.game_state == "menu":
+            if symbol in (key._1, key.NUM_1):
+                self.start_game('easy')
+            elif symbol in (key._2, key.NUM_2):
+                self.start_game('medium')
+            elif symbol in (key._3, key.NUM_3):
+                self.start_game('hard')
+            return
+
+        if symbol == key.ESCAPE:
+            # Unfocus chat if active
+            self.chat_active = False
+            return
+
+        if symbol == key.C:
+            # toggle chat focus
+            self.chat_active = not self.chat_active
+            return
+
+        if self.chat_active:
+            if symbol == key.BACKSPACE:
+                self.chat_input = self.chat_input[:-1]
+                return
+            if symbol in (key.ENTER, key.RETURN):
+                msg = self.chat_input.strip()
+                if msg:
+                    self.chat_history.append(msg)
+                self.chat_input = ""
+                return
+            # other keys handled in on_text
+            return
+
+        if self.game_state != "playing":
+            if symbol == key.R:
+                self.game_state = "menu"
+            return
+
+        # Movement (tile by tile)
+        dx, dy = 0, 0
+        if symbol == key.LEFT:
+            dx = -1
+        elif symbol == key.RIGHT:
+            dx = 1
+        elif symbol == key.UP:
+            dy = 1
+        elif symbol == key.DOWN:
+            dy = -1
+
+        if dx or dy:
+            nx, ny = self.player[0] + dx, self.player[1] + dy
+            if 0 <= nx < PLAY_W and 0 <= ny < PLAY_H and (nx, ny) not in self.walls:
+                self.player = (nx, ny)
+                if self.player == self.rescue:
+                    self.game_state = "victory"
+
+        if symbol == key.R:
+            self.game_state = "menu"
+
+    def on_text(self, char):
+        if self.chat_active:
+            # filter control chars
+            if 32 <= ord(char) <= 126:
+                self.chat_input += char
+
+    # -------- timer --------
+    def update_timer(self, dt):
+        if self.game_state == "playing":
+            self.time_left -= 1
+            if self.time_left <= 0:
+                self.time_left = 0
+                self.game_state = "timeout"
+
+# =========================
+# Run
+# =========================
+if __name__ == "__main__":
+    game = SARGame()
+    pyglet.app.run()
