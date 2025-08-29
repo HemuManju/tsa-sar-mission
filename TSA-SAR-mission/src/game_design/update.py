@@ -9,7 +9,7 @@ def tick(game, dt):
 
     pos = tuple(game.player)
 
-    # --- Pick up victim (replace any currently carried) ---
+    # Pick up victim (replace any currently carried) 
     if pos in game.victims:
         new_kind = game.victims[pos]
         # remove ground victim sprite
@@ -20,11 +20,11 @@ def tick(game, dt):
         del game.victims[pos]
         game.set_carried(new_kind)
 
-    # --- Rescue detection: end mission immediately on reaching triangle ---
+    #  Rescue detection: end mission immediately on reaching triangle)
     if game.rescue_pos and pos == game.rescue_pos and not game.rescue_reached:
         game.rescue_reached = True
         game.game_over = True                          # ✅ stop the game
-        game.hud["status"].text = "✅ Mission complete!"
+        game.hud["status"].text = " Mission complete!"
         append_line(game.chat, "[SYSTEM] Rescue point reached! 🎯 Mission complete.")
         return  # stop further updates this frame
 
