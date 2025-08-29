@@ -23,9 +23,9 @@ def tick(game, dt):
     #  Rescue detection: end mission immediately on reaching triangle)
     if game.rescue_pos and pos == game.rescue_pos and not game.rescue_reached:
         game.rescue_reached = True
-        game.game_over = True                          # ✅ stop the game
+        game.game_over = True                         
         game.hud["status"].text = " Mission complete!"
-        append_line(game.chat, "[SYSTEM] Rescue point reached! 🎯 Mission complete.")
+        append_line(game.chat, "[SYSTEM] Rescue point reached!  Mission complete.")
         return  # stop further updates this frame
 
     # --- HUD stats ---
@@ -45,7 +45,7 @@ def tick(game, dt):
     # --- Time up -> game over ---
     if game.time_remaining <= 0 and not game.game_over:
         game.game_over = True
-        game.hud["status"].text = "⏱️ Time up! Mission ended."
+        game.hud["status"].text = " Time up! Mission ended."
         append_line(game.chat, "[SYSTEM] Time up! Mission ended.")
         return
 
