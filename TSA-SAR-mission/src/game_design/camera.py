@@ -7,9 +7,7 @@ from config import (
 )
 
 def set_play_projection(window, player, view_mode, zoom):
-    """Set sub-viewport for playfield and an orthographic projection
-       centered on the player. Returns the view_range (2 for local, 5 for global).
-    """
+
     gl.glViewport(0, 0, PLAY_W_PX, WINDOW_HEIGHT)
 
     world_w = PLAY_W * CELL_SIZE
@@ -35,7 +33,7 @@ def set_play_projection(window, player, view_mode, zoom):
     right = left + w
     top = bottom + h
 
-    # ✅ Use pyglet.math.Mat4, not window.math.Mat4
+
     window.projection = pyglet.math.Mat4.orthogonal_projection(
         left, right, bottom, top, -1.0, 1.0
     )
@@ -43,7 +41,6 @@ def set_play_projection(window, player, view_mode, zoom):
 
 def reset_ui_projection(window):
     gl.glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
-    # ✅ Use pyglet.math.Mat4 here too
     window.projection = pyglet.math.Mat4.orthogonal_projection(
         0.0, float(WINDOW_WIDTH), 0.0, float(WINDOW_HEIGHT), -1.0, 1.0
     )

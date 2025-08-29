@@ -26,3 +26,6 @@ def bfs_distances(start, passable):
                 dist[(nx, ny)] = dist[(x, y)] + 1
                 q.append((nx, ny))
     return dist
+
+
+#Each function supports your map/walls/victim logic
