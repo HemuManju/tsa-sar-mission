@@ -38,6 +38,10 @@ COLOR_WALL_ORANGE = (255, 165, 0)
 MULTI_WALL_GROW_PCT  = 0.25 
 
 MIN_PASSABLE_RATIO  = 0.50  
+RED_SECTORS_X = 8   # split map into 3 columns
+RED_SECTORS_Y = 5  # and 2 rows → 6 sectors total
+WALL_SEGMENT_LEN = (8, 8)
+WALL_ATTEMPTS_PER_SEG = 30
 
 
 
@@ -57,6 +61,8 @@ COLOR_RESCUE = (255, 220, 60)
 NUM_RED = 15
 NUM_PURPLE = 30
 NUM_YELLOW = 45
+RED_SEP_CELLS = 6        # minimum Chebyshev distance between red victims
+RED_FAR_QUANTILE = 0.65  # pick reds from the farthest 35% of cells (65th percentile+)
 
 # Start pos
 START = (1, 1)
