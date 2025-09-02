@@ -16,7 +16,7 @@ PLAY_H = GRID_H
 # Time & zoom
 TIME_LIMIT = 180
 MIN_ZOOM = 0.25
-MAX_ZOOM = 2.0
+MAX_ZOOM = 3.0
 ZOOM_STEP = 0.10
 
 # Colors
@@ -31,7 +31,7 @@ COLOR_WALL = (90, 100, 115)
 COLOR_WALL_ORANGE = (255, 165, 0)  
 COLOR_PLAYER = (60, 200, 255)
 WALL_CLEARANCE = 2
-WALL_ORANGE_PCT   = 0.20
+WALL_ORANGE_PCT   = 0.25
 MULTI_WALL_PCT    = 0.15
 MULTI_WALL_LAYERS = (1, 2)
 COLOR_WALL_ORANGE = (255, 165, 0)
@@ -40,7 +40,7 @@ MULTI_WALL_GROW_PCT  = 0.25
 MIN_PASSABLE_RATIO  = 0.50  
 RED_SECTORS_X = 2   # split map into 3 columns
 RED_SECTORS_Y = 2  # and 2 rows → 6 sectors total
-WALL_SEGMENT_LEN = (8, 8)
+WALL_SEGMENT_LEN = (3, 11)
 WALL_ATTEMPTS_PER_SEG = 30          # vertical sector count for balancing
 RED_DIFFICULTY_DIST_WEIGHT = 1.0    # weight for normalized BFS distance
 RED_DIFFICULTY_DEADEND_BONUS = 0.8  # add if tile is a dead-end (degree==1)
@@ -75,9 +75,9 @@ START = (1, 1)
 # Difficulties
 # Difficulties (distinct seeds + optional overrides)
 DIFFICULTIES = {
-    "Easy":   {"segments": 75,  "seed": 32, "min_passable_ratio": 0.55, "multi_wall_pct": 0.10, "layers": (0,1)},
-    "Medium": {"segments": 120, "seed":32, "min_passable_ratio": 0.50, "multi_wall_pct": 0.15, "layers": (1,2)},
-    "Hard":   {"segments": 230, "seed": 32, "min_passable_ratio": 0.45, "multi_wall_pct": 0.3, "layers": (1,3)},
+    "Easy":   {"segments": 75,  "seed": 32, "min_passable_ratio": 0.55, "multi_wall_pct": 0.3, "layers": (1,1)},
+    "Medium": {"segments": 120, "seed":32, "min_passable_ratio": 0.50, "multi_wall_pct": 0.5, "layers": (1,2)},
+    "Hard":   {"segments": 200, "seed": 32, "min_passable_ratio": 0.45, "multi_wall_pct": 0.7, "layers": (1,3)},
 }
 # Fonts
 DEFAULT_FONT = "Arial"
