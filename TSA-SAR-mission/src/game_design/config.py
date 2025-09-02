@@ -5,7 +5,7 @@ import pyglet
 WINDOW_WIDTH = 1600
 WINDOW_HEIGHT = 800
 CELL_SIZE = 20
-SIDEBAR_W = 360
+SIDEBAR_W = 380
 PLAY_W_PX = WINDOW_WIDTH - SIDEBAR_W
 
 GRID_W = WINDOW_WIDTH // CELL_SIZE
@@ -23,6 +23,24 @@ ZOOM_STEP = 0.10
 COLOR_BG = (22, 24, 28)
 COLOR_GRID = (55, 60, 70)
 COLOR_WALL = (90, 100, 115)
+# Colors
+COLOR_BG = (22, 24, 28)
+COLOR_GRID = (55, 60, 70)
+COLOR_WALL = (90, 100, 115)
+
+COLOR_WALL_ORANGE = (255, 165, 0)  
+COLOR_PLAYER = (60, 200, 255)
+WALL_CLEARANCE = 2
+WALL_ORANGE_PCT   = 0.20
+MULTI_WALL_PCT    = 0.15
+MULTI_WALL_LAYERS = (1, 2)
+COLOR_WALL_ORANGE = (255, 165, 0)
+MULTI_WALL_GROW_PCT  = 0.25 
+
+MIN_PASSABLE_RATIO  = 0.50  
+
+
+
 COLOR_PLAYER = (60, 200, 255)
 
 COLOR_PANEL_RGB = (10, 10, 14)
@@ -45,7 +63,7 @@ START = (1, 1)
 
 # Difficulties
 DIFFICULTIES = {
-    "Easy": {"segments": 90, "seed": 42},
+    "Easy": {"segments": 75, "seed": 42},
     "Medium": {"segments": 120, "seed": 42},
     "Hard": {"segments": 175, "seed": 42},
 }
