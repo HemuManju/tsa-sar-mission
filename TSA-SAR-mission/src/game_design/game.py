@@ -76,7 +76,7 @@ class Game:
         self.passable = {(x,y) for x in range(PLAY_W) for y in range(PLAY_H)} - self.walls
         self.passable.add(START)
         distmap = bfs_distances(START, self.passable)  # still used by place_victims
-        self.victims = place_victims(distmap, START)
+        self.victims = place_victims(distmap, START, self.passable)
 
         # --- fixed-region rescue points: up-left, middle, down-left ---
         def nearest_valid(anchor, forbidden):

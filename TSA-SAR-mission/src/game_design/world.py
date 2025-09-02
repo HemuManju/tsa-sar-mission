@@ -125,31 +125,64 @@ def generate_walls(diff: str):
 
     return walls
 
-def place_victims(distmap, start):
-    """Spread victims; bias some reds to harder/farther spots per quadrant."""
-    rng=random.Random(99); victims={}
-    midx,midy=PLAY_W//2,PLAY_H//2
-    quad={"top_right":[], "top_left":[], "bottom_right":[], "bottom_left":[]}
-    for p,_ in list(distmap.items()):
-        if p==start: continue
-        quad[("top_" if p[1]>=midy else "bottom_")+("left" if p[0]<midx else "right")].append(p)
-    red=NUM_RED
-    for q in quad.values():
-        q.sort(key=lambda p: distmap.get(p,0), reverse=True)
-        hard=q[:max(1,len(q)//3)]; n=max(0, red//4)
-        for _ in range(n):
-            if not hard: break
-            p=rng.choice(hard); victims[p]="red"; hard.remove(p); distmap.pop(p,None)
-    while sum(1 for v in victims.values() if v=="red")<NUM_RED and distmap:
-        c=rng.choice(list(distmap.keys()))
-        if c not in victims: victims[c]="red"; distmap.pop(c,None)
-    rem=[p for p in list(distmap.keys()) if p not in victims and p!=start]; rng.shuffle(rem)
-    p2,y2=NUM_PURPLE,NUM_YELLOW
-    for p in rem:
-        if p2>0: victims[p]="purple"; p2-=1
-        elif y2>0: victims[p]="yellow"; y2-=1
-        else: break
+# --- drop-in replacement in world.py ---
+def place_victims(distmap, start, all_passable=None):
+    """
+    Place victims using BFS distances when available; if Hard leaves too few
+    reachable tiles in `distmap`, fall back to `all_passable` so we always
+    place victims somewhere playable.
+    """
+    rng = random.Random(99)
+    victims = {}
+
+    # Build candidate pool: prefer BFS-reachable cells, then any passable.
+    pool = [p for p in distmap.keys() if p != start]
+    if all_passable is not None:
+        extras = list((all_passable - set(pool)) - {start})
+        rng.shuffle(extras)
+        pool += extras
+    if not pool:
+        return victims  # nothing to place on
+
+    # Quadrants (for light balancing) and distance bias
+    mid_x, mid_y = PLAY_W // 2, PLAY_H // 2
+    quads = {"top_right": [], "top_left": [], "bottom_right": [], "bottom_left": []}
+    for p in pool:
+        qx = "left" if p[0] < mid_x else "right"
+        qy = "bottom" if p[1] < mid_y else "top"
+        quads[f"{qy}_{qx}"].append(p)
+
+    keydist = lambda p: distmap.get(p, 0)  # prefer farther by BFS
+    for q in quads.values():
+        q.sort(key=keydist, reverse=True)
+
+    # 1) Reds: quadrant-balanced, then fill remaining by farthest
+    reds_left = NUM_RED
+    per_q = max(0, NUM_RED // 4)
+    for q in quads.values():
+        take = min(per_q, len(q), reds_left)
+        for _ in range(take):
+            victims[q.pop(0)] = "red"
+            reds_left -= 1
+    if reds_left > 0:
+        rest = sorted([p for p in pool if p not in victims], key=keydist, reverse=True)
+        for p in rest[:reds_left]:
+            victims[p] = "red"
+
+    # 2) Purples & Yellows: fill remaining spots
+    remaining = [p for p in pool if p not in victims]
+    rng.shuffle(remaining)
+    p2, y2 = NUM_PURPLE, NUM_YELLOW
+    for p in remaining:
+        if p2 > 0:
+            victims[p] = "purple"; p2 -= 1
+        elif y2 > 0:
+            victims[p] = "yellow"; y2 -= 1
+        if p2 == 0 and y2 == 0:
+            break
+
     return victims
+
 
 def draw_world(play_batch, walls, victims):
     """Draw walls (whole-component orange) and victim circles."""
