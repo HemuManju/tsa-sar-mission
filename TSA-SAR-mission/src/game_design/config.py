@@ -66,8 +66,8 @@ COLOR_RESCUE = (255, 220, 60)
 NUM_RED = 15
 NUM_PURPLE = 30
 NUM_YELLOW = 45
-RED_SEP_CELLS = 6        # minimum Chebyshev distance between red victims
-RED_FAR_QUANTILE = 0.65  # pick reds from the farthest 35% of cells (65th percentile+)
+RED_SEP_CELLS = 10      # minimum Chebyshev distance between red victims
+RED_FAR_QUANTILE = 0.3  # pick reds from the farthest 35% of cells (65th percentile+)
 
 # Start pos
 START = (1, 1)
