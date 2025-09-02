@@ -8,16 +8,16 @@ from config import (
     COLOR_WALL_ORANGE,
     # Victims & difficulties
     NUM_RED, NUM_PURPLE, NUM_YELLOW, DIFFICULTIES,
-    # Wall gen knobs (globals; can be overridden per difficulty)
+    # Wall generation knobs (global defaults; can be overridden per difficulty)
     WALL_CLEARANCE, WALL_ORANGE_PCT, MULTI_WALL_PCT, MULTI_WALL_LAYERS,
-    MULTI_WALL_GROW_PCT, MIN_PASSABLE_RATIO,
+    MULTI_WALL_GROW_PCT, MIN_PASSABLE_RATIO, WALL_SEGMENT_LEN, WALL_ATTEMPTS_PER_SEG,
     # Red victim distribution knobs
     RED_SEP_CELLS, RED_FAR_QUANTILE, RED_SECTORS_X, RED_SECTORS_Y,
-    # Segment controls
-    WALL_SEGMENT_LEN, WALL_ATTEMPTS_PER_SEG,
+    RED_DIFFICULTY_DIST_WEIGHT, RED_DIFFICULTY_DEADEND_BONUS,
+    RED_DIFFICULTY_CORRIDOR_BONUS, RED_DIFFICULTY_NEARWALL_BONUS,
 )
 
-# --- small helpers ---
+# -------- small helpers --------
 def victim_color(k): return COLOR_YELLOW if k == "yellow" else (COLOR_PURPLE if k == "purple" else COLOR_RED)
 def _in(x, y): return 0 <= x < PLAY_W and 0 <= y < PLAY_H
 def _border_cells():
@@ -45,16 +45,17 @@ def _comps(wset):
         comps.append(comp)
     return comps
 
-# --- wall generation ---
+# -------- wall generation --------
 def generate_walls(difficulty: str):
     """
     Borders (kept gray) + random segments with clearance; slim thickening (4-neighbor rim);
-    coverage cap so each mode remains playable. Uses per-difficulty overrides if present.
+    coverage cap so each mode remains playable. Uses per-difficulty overrides if present:
+      - min_passable_ratio, multi_wall_pct, layers, grow_pct, seed, segments
     """
     cfg = DIFFICULTIES[difficulty]
     rng = random.Random(cfg.get("seed", None))
 
-    # allow per-difficulty overrides (fallback to global config knobs)
+    # per-difficulty overrides (fallback to global config knobs)
     min_passable = float(cfg.get("min_passable_ratio", MIN_PASSABLE_RATIO))
     multi_pct    = float(cfg.get("multi_wall_pct",   MULTI_WALL_PCT))
     layers_min, layers_max = tuple(cfg.get("layers", MULTI_WALL_LAYERS))
@@ -65,7 +66,7 @@ def generate_walls(difficulty: str):
     max_walls = int(total * (1.0 - min_passable))
     def can_add(n): return len(walls) + n <= max_walls
 
-    # 1) perimeter (kept gray forever)
+    # 1) perimeter (always gray; still reserves clearance)
     border = _border_cells()
     walls |= border
     reserved |= _buf(border)
@@ -130,70 +131,101 @@ def generate_walls(difficulty: str):
 
     return walls
 
-# --- victim placement (reds: far, spaced, sector-balanced) ---
+# -------- victim placement (reds: far, hard, spread) --------
 def place_victims(distmap, start, all_passable=None):
     """
-    Reds come from farthest quantile, balanced across RED_SECTORS_X × RED_SECTORS_Y sectors,
-    with Chebyshev spacing >= RED_SEP_CELLS (relaxes if map is tight).
-    Purples/Yellows fill the remaining slots.
+    Reds: farthest-quantile, sector-QUOTA balanced across RED_SECTORS_X×RED_SECTORS_Y,
+    global Chebyshev spacing >= RED_SEP_CELLS (relaxes if tight), ranked by hardness:
+      score = dist_weight*norm_dist + bonuses(dead-end/corridor/near-wall).
+    Purples & Yellows fill remaining.
     """
     rng = random.Random(99)
     victims = {}
 
-    # pool: reachable first, then any passable (for tight Hard maps)
+    # Candidate pool: reachable first, then any passable (for tight Hard maps)
     pool = [p for p in distmap.keys() if p != start]
     if all_passable is not None:
         extras = list((all_passable - set(pool)) - {start})
         rng.shuffle(extras); pool += extras
     if not pool: return victims
 
-    # distance scores (unreachable -> 0)
-    scored = [(p, distmap.get(p, 0)) for p in pool]
-    scored.sort(key=lambda t: t[1])
-    q_idx = int(len(scored) * float(RED_FAR_QUANTILE))
-    cutoff = scored[q_idx][1] if 0 <= q_idx < len(scored) else 0
-    far = [p for (p, d) in scored if d >= cutoff]
-    far.sort(key=lambda p: distmap.get(p, 0), reverse=True)
+    # Distances & far-quantile filter
+    dists = {p: distmap.get(p, 0) for p in pool}
+    scored_linear = sorted(((p, dists[p]) for p in pool), key=lambda t: t[1])  # asc
+    q_idx = int(len(scored_linear) * float(RED_FAR_QUANTILE))
+    cutoff = scored_linear[q_idx][1] if 0 <= q_idx < len(scored_linear) else 0
+    far = [p for (p, d) in scored_linear if d >= cutoff]
+    if len(far) < max(NUM_RED, 8):  # pad with next-farthest if needed
+        far += [p for p, _ in reversed(scored_linear) if p not in far]
 
-    # sectoring
+    # Topology over passable
+    passable = set(all_passable) if all_passable is not None else set(p for p, _ in scored_linear)
+    dirs4 = ((1,0),(-1,0),(0,1),(0,-1))
+    def degree(p): 
+        x,y=p; return sum(((x+dx,y+dy) in passable) for dx,dy in dirs4)
+    def is_corridor(p):
+        x,y=p; neigh=[(x+dx,y+dy) for dx,dy in dirs4 if (x+dx,y+dy) in passable]
+        if len(neigh)!=2: return False
+        (x1,y1),(x2,y2)=neigh; return (x1-x)==-(x2-x) and (y1-y)==-(y2-y)
+    def blocked_sides(p):
+        x,y=p; return 4 - sum(((x+dx,y+dy) in passable) for dx,dy in dirs4)
+
+    # Hardness score
+    maxd = max(dists.values()) if dists else 1
+    def hardness_score(p):
+        nd = (dists.get(p,0)/maxd) if maxd>0 else 0.0
+        s = RED_DIFFICULTY_DIST_WEIGHT * nd
+        if degree(p) == 1: s += RED_DIFFICULTY_DEADEND_BONUS
+        if is_corridor(p): s += RED_DIFFICULTY_CORRIDOR_BONUS
+        if blocked_sides(p) >= 2: s += RED_DIFFICULTY_NEARWALL_BONUS
+        return s
+
+    # Sector buckets + quotas
     SX, SY = int(RED_SECTORS_X), int(RED_SECTORS_Y)
     def sector_of(p):
         sx = min(SX-1, (p[0] * SX) // max(1, PLAY_W))
         sy = min(SY-1, (p[1] * SY) // max(1, PLAY_H))
-        return (int(sx), int(sy))
-    buckets = {}
+        return int(sx), int(sy)
+    sector_count = SX * SY
+    buckets = {i: [] for i in range(sector_count)}
     for p in far:
-        buckets.setdefault(sector_of(p), []).append(p)
-    for lst in buckets.values():
-        lst.sort(key=lambda p: distmap.get(p, 0), reverse=True)
+        sx, sy = sector_of(p)
+        buckets[sy * SX + sx].append(p)
+    for i in buckets:
+        buckets[i].sort(key=hardness_score, reverse=True)
 
-    # greedy round-robin with global spacing
+    base = NUM_RED // sector_count
+    rem  = NUM_RED % sector_count
+    order = list(range(sector_count)); rng.shuffle(order)  # who gets +1
+    quotas = {i: base + (1 if idx < rem else 0) for idx, i in enumerate(order)}
+
+    # Greedy round-robin with global spacing (relax if stuck)
     def cheby(a,b): return max(abs(a[0]-b[0]), abs(a[1]-b[1]))
     reds, sep = [], int(RED_SEP_CELLS)
-    order = list(buckets.keys()) or [(0,0)]
     while len(reds) < NUM_RED and sep >= 2:
-        placed = False
-        for s in order:
-            if len(reds) >= NUM_RED: break
-            lst = buckets.get(s, [])
-            while lst:
-                p = lst[0]
+        placed_any = False
+        for i in order:
+            if len(reds) >= NUM_RED or quotas[i] <= 0: continue
+            lst = buckets[i]; j = 0
+            while j < len(lst):
+                p = lst[j]
                 if all(cheby(p,q) >= sep for q in reds):
-                    reds.append(p); lst.pop(0); placed = True; break
-                else:
-                    lst.pop(0)
-        if not placed: sep -= 1  # relax if stuck
+                    reds.append(p); quotas[i] -= 1; lst.pop(j); placed_any = True; break
+                j += 1
+        if not placed_any: sep -= 1  # relax spacing a bit if blocked
 
-    # top up if still short
+    # Top-up from remaining high-score candidates (keep min sep=2)
     if len(reds) < NUM_RED:
-        remaining = [p for p in far if p not in reds] + [p for p,_ in scored if p not in reds]
+        remaining = []
+        for i in order: remaining += buckets[i]
+        remaining += sorted((set(far) - set(reds)), key=hardness_score, reverse=True)
         for p in remaining:
             if len(reds) >= NUM_RED: break
             if all(cheby(p,q) >= 2 for q in reds): reds.append(p)
 
     for p in reds[:NUM_RED]: victims[p] = "red"
 
-    # others
+    # Purples & Yellows
     rest = [p for p in pool if p not in victims and p != start]
     rng.shuffle(rest)
     p2, y2 = NUM_PURPLE, NUM_YELLOW
@@ -204,9 +236,9 @@ def place_victims(distmap, start, all_passable=None):
 
     return victims
 
-# --- drawing ---
+# -------- drawing --------
 def draw_world(play_batch, walls, victims):
-    """Walls (component-orange except perimeter) + victim circles."""
+    """Walls (whole-component orange except perimeter) + victim circles."""
     comps = _comps(walls)
     orange = set()
     if comps:

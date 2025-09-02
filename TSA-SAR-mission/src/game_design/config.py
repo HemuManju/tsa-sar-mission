@@ -38,10 +38,15 @@ COLOR_WALL_ORANGE = (255, 165, 0)
 MULTI_WALL_GROW_PCT  = 0.25 
 
 MIN_PASSABLE_RATIO  = 0.50  
-RED_SECTORS_X = 8   # split map into 3 columns
-RED_SECTORS_Y = 5  # and 2 rows → 6 sectors total
+RED_SECTORS_X = 2   # split map into 3 columns
+RED_SECTORS_Y = 2  # and 2 rows → 6 sectors total
 WALL_SEGMENT_LEN = (8, 8)
-WALL_ATTEMPTS_PER_SEG = 30
+WALL_ATTEMPTS_PER_SEG = 30          # vertical sector count for balancing
+RED_DIFFICULTY_DIST_WEIGHT = 1.0    # weight for normalized BFS distance
+RED_DIFFICULTY_DEADEND_BONUS = 0.8  # add if tile is a dead-end (degree==1)
+RED_DIFFICULTY_CORRIDOR_BONUS = 0.4 # add if tile is a corridor (degree==2 & straight)
+RED_DIFFICULTY_NEARWALL_BONUS = 0.2 # add if ≥2 blocked sides
+
 
 
 
