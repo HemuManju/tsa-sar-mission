@@ -62,12 +62,12 @@ NUM_YELLOW = 45
 START = (1, 1)
 
 # Difficulties
+# Difficulties (distinct seeds + optional overrides)
 DIFFICULTIES = {
-    "Easy": {"segments": 75, "seed": 42},
-    "Medium": {"segments": 120, "seed": 42},
-    "Hard": {"segments": 175, "seed": 42},
+    "Easy":   {"segments": 75,  "seed": 32, "min_passable_ratio": 0.55, "multi_wall_pct": 0.10, "layers": (0,1)},
+    "Medium": {"segments": 120, "seed":32, "min_passable_ratio": 0.50, "multi_wall_pct": 0.15, "layers": (1,2)},
+    "Hard":   {"segments": 230, "seed": 32, "min_passable_ratio": 0.45, "multi_wall_pct": 0.3, "layers": (1,3)},
 }
-
 # Fonts
 DEFAULT_FONT = "Arial"
 
