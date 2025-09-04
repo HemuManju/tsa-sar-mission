@@ -2,8 +2,9 @@
 import pyglet
 from game import Game
 
+
 def run_sar_mission_game():
-    _ = Game()
+    game = Game()
     pyglet.app.run()
 
 if __name__ == "__main__":

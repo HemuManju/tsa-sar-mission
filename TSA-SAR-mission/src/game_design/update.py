@@ -88,20 +88,18 @@ def _handle_rescue(game, pos):
         game.hud["status"].text = " Mission complete!"
         append_line(game.chat, "[SYSTEM] Rescue point reached! Mission complete.")
 
-
 def _update_hud(game):
-    """Refresh HUD labels for time, zoom, victims, player, rescue list, carried."""
+    """Refresh HUD labels for time, zoom, victims, player, carried."""
     reds = sum(1 for k in game.victims.values() if k == "red")
     purp = sum(1 for k in game.victims.values() if k == "purple")
     yell = sum(1 for k in game.victims.values() if k == "yellow")
-    rtxt = _format_rescue_text(game)
 
     L = game.hud["labels"]
     L["time"].text = f"Time: {game.time_remaining:>3d}s"
-    L["zoom"].text = f"Zoom: {game.zoom:.2f}×"
+    # L["zoom"].text = f"Zoom: {game.zoom:.2f}×"   
     L["victims"].text = f"Victims left (R/P/Y): {reds}/{purp}/{yell}"
     L["player"].text = f"Player: {game.player[0]},{game.player[1]}"
-    L["rescue"].text = f"Rescue: {rtxt}"
+    # L["rescue"].text = f"Rescue: {rtxt}"         
     L["carried"].text = f"Carrying: {_format_carried_text(game)}"
 
 
