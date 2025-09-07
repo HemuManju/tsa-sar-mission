@@ -69,13 +69,14 @@ NUM_YELLOW = 45
 RED_SEP_CELLS = 10      # minimum Chebyshev distance between red victims
 RED_FAR_QUANTILE = 0.3  # pick reds from the farthest 35% of cells (65th percentile+)
 
+PROTECTED_CELLS = [(5, 5), (10, 8), (12, 15)]  
 
 
 # Distribution for purple & yellow (sector-based)
-PURPLE_SECTORS_X = 3
-PURPLE_SECTORS_Y = 3
-YELLOW_SECTORS_X = 4
-YELLOW_SECTORS_Y = 4
+PURPLE_SECTORS_X = 9
+PURPLE_SECTORS_Y = 9
+YELLOW_SECTORS_X = 9
+YELLOW_SECTORS_Y = 9
 
 # Start pos
 START = (9, 9)
@@ -83,9 +84,9 @@ START = (9, 9)
 # Difficulties
 # Difficulties (distinct seeds + optional overrides)
 DIFFICULTIES = {
-    "Easy":   {"segments": 75,  "seed": 32, "min_passable_ratio": 0.65, "multi_wall_pct": 0.3, "layers": (1,1)},
-    "Medium": {"segments": 120, "seed":32, "min_passable_ratio": 0.55, "multi_wall_pct": 0.5, "layers": (1,2)},
-    "Hard":   {"segments": 200, "seed": 32, "min_passable_ratio": 0.45, "multi_wall_pct": 0.7, "layers": (1,3)},
+    "Easy":   {"segments": 75,  "seed": 32, "min_passable_ratio": 0.75, "multi_wall_pct": 0.3, "layers": (1,1)},
+    "Medium": {"segments": 120, "seed":32, "min_passable_ratio": 0.65, "multi_wall_pct": 0.4, "layers": (1,2)},
+    "Hard":   {"segments": 180, "seed": 32, "min_passable_ratio": 0.55, "multi_wall_pct": 0.6, "layers": (1,2)},
 }
 # Fonts
 DEFAULT_FONT = "Arial"

@@ -18,6 +18,7 @@ from config import (
     PURPLE_SECTORS_X, PURPLE_SECTORS_Y,
     YELLOW_SECTORS_X, YELLOW_SECTORS_Y,
 )
+from config import PROTECTED_CELLS
 
 # -------- small helpers --------
 def victim_color(k): return COLOR_YELLOW if k == "yellow" else (COLOR_PURPLE if k == "purple" else COLOR_RED)
@@ -72,6 +73,7 @@ def generate_walls(difficulty: str):
     walls |= border
     reserved |= _buf(border)
     reserved |= _buf({START}, max(2, WALL_CLEARANCE))
+    reserved |= set(PROTECTED_CELLS)
 
     # 2) random segments with clearance + budget
     segs = int(cfg.get("segments", 120))
