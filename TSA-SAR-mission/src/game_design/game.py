@@ -113,7 +113,7 @@ class Game:
         with open("matrix.txt", "w") as f:
             for row in mat:
                 f.write(" ".join(map(str, row)) + "\n")
-            print("✅ Full matrix saved to matrix.txt")
+            print(" Full matrix saved to matrix.txt")
             print("\nPreview columns and rows")
             for row in mat:        # all rows
              print(row)         # full row (all columns)
