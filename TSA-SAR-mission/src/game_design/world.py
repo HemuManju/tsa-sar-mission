@@ -50,10 +50,7 @@ def _comps(wset):
 
 # -------- wall generation --------
 def generate_walls(difficulty: str):
-    """
-    Borders (kept gray) + random segments with clearance; slim thickening (4-neighbor rim);
-    coverage cap so each mode remains playable. Uses per-difficulty overrides if present.
-    """
+
     cfg = DIFFICULTIES[difficulty]
     rng = random.Random(cfg.get("seed", None))
 
@@ -79,7 +76,7 @@ def generate_walls(difficulty: str):
     segs = int(cfg.get("segments", 120))
     attempts = segs * int(WALL_ATTEMPTS_PER_SEG)
     placed = 0
-    dirs = [(1,0), (-1,0), (0,1), (0,-1)]
+    dirs = [(1,0), (-1,0), (0,1), (0,-1)] #possible directions
     min_len, max_len = WALL_SEGMENT_LEN
 
     while placed < segs and attempts > 0 and len(walls) < max_walls:
@@ -89,14 +86,14 @@ def generate_walls(difficulty: str):
         dx, dy = rng.choice(dirs)
         length = rng.randint(int(min_len), int(max_len))
 
-        prop = []
+        prop = []      
         x, y = sx, sy
         ok = True
-        for _ in range(length):
+        for _ in range(length):              #ensures only valid, non-overlapping wall segments
             if not _in(x, y) or (x, y) == START or (x, y) in reserved or (x, y) in walls:
                 ok = False; break
             prop.append((x, y)); x += dx; y += dy
-        if not ok or not prop or any(p in walls for p in _buf(prop)): continue
+        if not ok or not prop or any(p in walls for p in _buf(prop)): continue   #buffer overlap
 
         if not can_add(len(prop)):
             need = max(0, max_walls - len(walls))
@@ -135,7 +132,7 @@ def generate_walls(difficulty: str):
     return walls
 
 # -------- victim placement --------
-def place_victims(distmap, start, all_passable=None):
+def place_victims(distmap, start, all_passable=None):  #distmap: how far every cell is from start
     """
     Reds: sector-quota, farthest quantile, spaced.
     Purples & Yellows: also sector-based quotas for better distribution.
@@ -143,8 +140,8 @@ def place_victims(distmap, start, all_passable=None):
     rng = random.Random(99)
     victims = {}
 
-    # Candidate pool
-    pool = [p for p in distmap.keys() if p != start]
+    # Candidate pool (choose which cells get victims, while respecting rules (not on START, not blocked, spread by sector)
+    pool = [p for p in distmap.keys() if p != start]  #pool = the initial list of candidate cells where victims could be placed.
     if all_passable is not None:
         extras = list((all_passable - set(pool)) - {start})
         rng.shuffle(extras); pool += extras
@@ -152,9 +149,9 @@ def place_victims(distmap, start, all_passable=None):
 
     # ---------------- REDS ----------------
     dists = {p: distmap.get(p, 0) for p in pool}
-    scored_linear = sorted(((p, dists[p]) for p in pool), key=lambda t: t[1])  # asc
+    scored_linear = sorted(((p, dists[p]) for p in pool), key=lambda t: t[1])  
     q_idx = int(len(scored_linear) * float(RED_FAR_QUANTILE))
-    cutoff = scored_linear[q_idx][1] if 0 <= q_idx < len(scored_linear) else 0
+    cutoff = scored_linear[q_idx][1] if 0 <= q_idx < len(scored_linear) else 0  #cutoff distance 
     far = [p for (p, d) in scored_linear if d >= cutoff]
     if len(far) < max(NUM_RED, 8):
         far += [p for p, _ in reversed(scored_linear) if p not in far]
