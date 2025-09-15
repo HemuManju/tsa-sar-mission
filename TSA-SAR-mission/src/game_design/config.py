@@ -91,6 +91,6 @@ DIFFICULTIES = {
 # Fonts
 DEFAULT_FONT = "Arial"
 
-# Convenience
+
 def make_window():
     return pyglet.window.Window(WINDOW_WIDTH, WINDOW_HEIGHT, "SAR Mission")

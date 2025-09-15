@@ -74,3 +74,15 @@ def mouse_press(game, x, y, button, modifiers):
         else:
             game.chat["focus"] = False
             if game.chat["caret"]: game.chat["caret"].visible = False
+
+
+
+
+"...........collection......"
+
+def controllers():
+    return {
+        "move": move,
+        "key_press": key_press,
+        "mouse_press": mouse_press
+    }

@@ -283,3 +283,16 @@ def make_rescue_triangle(play_batch, rescue_pos):
     s = CELL_SIZE * 0.9; h = s * 0.5
     return shapes.Triangle(cx, cy + h, cx - s/2, cy - h, cx + s/2, cy - h,
                            color=COLOR_RESCUE, batch=play_batch)
+
+
+
+"""....collection..."""
+
+def world():
+    return {
+        "victim_color": victim_color,
+        "generate_walls": generate_walls,
+        "place_victims": place_victims,
+        "draw_world": draw_world,
+        "make_rescue_triangle": make_rescue_triangle
+    }

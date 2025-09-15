@@ -48,3 +48,15 @@ def append_line(chat, line):
     chat["hist_layout"].view_y = max(
         0, chat["hist_layout"].content_height - chat["hist_layout"].height
     )
+
+
+
+
+
+"...........collection......"
+
+def chatui():
+    return {
+        "build_chat": build_chat,
+        "append_line": append_line
+    }

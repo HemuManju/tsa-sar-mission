@@ -139,3 +139,20 @@ def second(game, dt):
     if game.state == "playing" and not game.game_over:
         drain = getattr(game, "time_drain", 1)  # default 1s/sec; can be 2 on Hard, etc.
         game.time_remaining -= drain
+
+
+
+
+
+"..........collection...."
+
+def update():
+    return {
+        "_format_rescue_text": _format_rescue_text,
+        "_format_carried_text": _format_carried_text,
+        "_pickup_if_present": _pickup_if_present,
+        "_handle_rescue": _handle_rescue,
+        "_update_hud": _update_hud,
+        "tick": tick,
+        "second": second
+    }

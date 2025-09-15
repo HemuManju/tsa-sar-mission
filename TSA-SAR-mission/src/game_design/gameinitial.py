@@ -254,12 +254,3 @@ class Game:
     def on_text_motion(self, m):
         if self.chat["focus"] and self.chat["caret"]:
             self.chat["caret"].on_text_motion(m)
-
-
-
-
-"...-------------collection------"""
-def game():
-    return {
-        "Game": Game
-    }

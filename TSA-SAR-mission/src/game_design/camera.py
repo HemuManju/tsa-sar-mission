@@ -1,4 +1,3 @@
-# camera.py
 import pyglet
 from pyglet import gl
 from config import (
@@ -6,11 +5,14 @@ from config import (
     MIN_ZOOM, MAX_ZOOM, CELL_SIZE, PLAY_W, PLAY_H
 )
 
+
 def set_play_projection(window, player, view_mode, zoom):
     """
-    Edge-panning camera:
-      - Global = same behavior as before (centered/zoomed on whole map)
-      - Local  = viewport only moves when player crosses a margin near edges
+    Camera projection:
+      - Global = full map, center-follow with zoom
+      - Local  = starts as 5x5 zone (2 overlap). When zoom changes,
+                 the edge triggers & stride depend on how many grid
+                 cells are actually visible at the current zoom.
     """
     gl.glViewport(0, 0, PLAY_W_PX, WINDOW_HEIGHT)
 
@@ -18,57 +20,80 @@ def set_play_projection(window, player, view_mode, zoom):
     world_h = PLAY_H * CELL_SIZE
     z = max(MIN_ZOOM, min(MAX_ZOOM, zoom))
 
-    # Player center in pixels
+    # Player center in world pixels
     cx = (player[0] + 0.5) * CELL_SIZE
     cy = (player[1] + 0.5) * CELL_SIZE
 
-    # Viewport size
     if view_mode == "global":
+        # ----- Global: center-follow with zoom -----
         w = min(world_w, world_w / z)
         h = min(world_h, world_h / z)
-        # Center-follow for global (unchanged)
         left   = max(0.0, min(cx - w / 2.0, world_w - w))
         bottom = max(0.0, min(cy - h / 2.0, world_h - h))
 
     else:
-        # Local view window (same size rules as before)
-        base_w = 5 * CELL_SIZE
-        base_h = 5 * CELL_SIZE
-        w = min(base_w / z, world_w)
-        h = min(base_h / z, world_h)
+        # ----- Local: 5x5 start, then zoom-aware edges & stride -----
+        BASE_ZONE_W_CELLS = 5
+        BASE_ZONE_H_CELLS = 5
+        OVERLAP_CELLS     = 2  # keep a constant 2-cell overlap
 
-        # Keep per-window camera state
         if not hasattr(window, "_cam_state"):
             window._cam_state = {}
-
         cam = window._cam_state
-        # Re-init when switching mode or viewport size changes (e.g., zoom)
-        if cam.get("mode") != "local" or cam.get("w") != w or cam.get("h") != h:
-            cam["mode"], cam["w"], cam["h"] = "local", w, h
-            cam["left"]   = max(0.0, min(cx - w / 2.0, world_w - w))
-            cam["bottom"] = max(0.0, min(cy - h / 2.0, world_h - h))
 
+        # First time entering local: align around player using 5x5 zone
+        if cam.get("mode") != "local":
+            cam["mode"] = "local"
+            base_zone_w = BASE_ZONE_W_CELLS * CELL_SIZE
+            base_zone_h = BASE_ZONE_H_CELLS * CELL_SIZE
+            left   = max(0, min(cx - base_zone_w // 2, world_w - base_zone_w))
+            bottom = max(0, min(cy - base_zone_h // 2, world_h - base_zone_h))
+            cam["left"], cam["bottom"] = left, bottom
+
+        # --- Compute visible window (in world px) at current zoom,
+        #     snapped to whole cells so edges line up with grid.
+        base_zone_w = BASE_ZONE_W_CELLS * CELL_SIZE
+        base_zone_h = BASE_ZONE_H_CELLS * CELL_SIZE
+        vis_cells_x = max(1, int((base_zone_w / z) / CELL_SIZE))  # e.g. 5/z -> 10, 4, 9, ...
+        vis_cells_y = max(1, int((base_zone_h / z) / CELL_SIZE))
+        w = vis_cells_x * CELL_SIZE
+        h = vis_cells_y * CELL_SIZE
+
+        # Stride = visible window minus a fixed 2-cell overlap (in world px)
+        overlap_px = OVERLAP_CELLS * CELL_SIZE
+        stride_x = max(CELL_SIZE, w - overlap_px)
+        stride_y = max(CELL_SIZE, h - overlap_px)
+
+        # Current camera rect origin
         left, bottom = cam["left"], cam["bottom"]
 
-        # How close to the edge before we pan (in cells)
-        EDGE_MARGIN_CELLS = 1    # tweak to taste (e.g., 2 or 3)
-        margin = EDGE_MARGIN_CELLS * CELL_SIZE
+        # --- If zoom changed, ensure player is still inside the new visible rect.
+        #     Step repeatedly by stride until inside (handles big zoom jumps).
+        while cx < left and left > 0:
+            left = max(0, left - stride_x)
+        while cx >= left + w and left < world_w - w:
+            left = min(world_w - w, left + stride_x)
 
-        # Horizontal edge-pan
-        if cx < left + margin:
-            left = max(0.0, cx - margin)
-        elif cx > left + w - margin:
-            left = min(world_w - w, cx - (w - margin))
+        while cy < bottom and bottom > 0:
+            bottom = max(0, bottom - stride_y)
+        while cy >= bottom + h and bottom < world_h - h:
+            bottom = min(world_h - h, bottom + stride_y)
 
-        # Vertical edge-pan
-        if cy < bottom + margin:
-            bottom = max(0.0, cy - margin)
-        elif cy > bottom + h - margin:
-            bottom = min(world_h - h, cy - (h - margin))
+        # --- Normal movement edge triggers (reach last visible cell -> jump)
+        if cx <= left:
+            left = max(0, left - stride_x)
+        elif cx >= left + w:
+            left = min(world_w - w, left + stride_x)
 
-        # Save updated camera rect
+        if cy <= bottom:
+            bottom = max(0, bottom - stride_y)
+        elif cy >= bottom + h:
+            bottom = min(world_h - h, bottom + stride_y)
+
+        # Save updated origin
         cam["left"], cam["bottom"] = left, bottom
 
+    # Final projection using the zoom-aware visible window
     right = left + w
     top   = bottom + h
 
@@ -76,12 +101,22 @@ def set_play_projection(window, player, view_mode, zoom):
         left, right, bottom, top, -1.0, 1.0
     )
 
-    # Keep returning view_range like before (used by HUD/logic if any)
+    # Keep your original return contract so nothing else breaks.
     return 2 if view_mode == "local" else 5
 
 
 def reset_ui_projection(window):
+    """Reset projection for HUD/UI drawing (screen-space coords)."""
     gl.glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
     window.projection = pyglet.math.Mat4.orthogonal_projection(
         0.0, float(WINDOW_WIDTH), 0.0, float(WINDOW_HEIGHT), -1.0, 1.0
     )
+
+"""-------------collect-------"""
+
+def camera():
+    return {
+        "set_play_projection": set_play_projection,
+        "reset_ui_projection": reset_ui_projection
+    }
+

@@ -28,4 +28,13 @@ def bfs_distances(start, passable):
     return dist
 
 
-#Each function supports your map/walls/victim logic
+
+
+"......collection...."
+def helpers():
+    return {
+        "line_h": line_h,
+        "line_v": line_v,
+        "clamp_grid": clamp_grid,
+        "bfs_distances": bfs_distances
+    }
