@@ -13,6 +13,10 @@ def set_play_projection(window, player, view_mode, zoom):
       - Local  = starts as 5x5 zone (2 overlap). When zoom changes,
                  the edge triggers & stride depend on how many grid
                  cells are actually visible at the current zoom.
+
+    Change requested:
+      - When the player hits an edge/corner in LOCAL view, pan the camera
+        by exactly ONE GRID CELL instead of jumping by a whole window.
     """
     gl.glViewport(0, 0, PLAY_W_PX, WINDOW_HEIGHT)
 
@@ -35,7 +39,7 @@ def set_play_projection(window, player, view_mode, zoom):
         # ----- Local: 5x5 start, then zoom-aware edges & stride -----
         BASE_ZONE_W_CELLS = 5
         BASE_ZONE_H_CELLS = 5
-        OVERLAP_CELLS     = 2  # keep a constant 2-cell overlap
+        OVERLAP_CELLS     = 2  # used when adjusting to zoom changes
 
         if not hasattr(window, "_cam_state"):
             window._cam_state = {}
@@ -54,12 +58,12 @@ def set_play_projection(window, player, view_mode, zoom):
         #     snapped to whole cells so edges line up with grid.
         base_zone_w = BASE_ZONE_W_CELLS * CELL_SIZE
         base_zone_h = BASE_ZONE_H_CELLS * CELL_SIZE
-        vis_cells_x = max(1, int((base_zone_w / z) / CELL_SIZE))  # e.g. 5/z -> 10, 4, 9, ...
+        vis_cells_x = max(1, int((base_zone_w / z) / CELL_SIZE))
         vis_cells_y = max(1, int((base_zone_h / z) / CELL_SIZE))
         w = vis_cells_x * CELL_SIZE
         h = vis_cells_y * CELL_SIZE
 
-        # Stride = visible window minus a fixed 2-cell overlap (in world px)
+        # Stride used ONLY for fitting after zoom changes (not for edge panning)
         overlap_px = OVERLAP_CELLS * CELL_SIZE
         stride_x = max(CELL_SIZE, w - overlap_px)
         stride_y = max(CELL_SIZE, h - overlap_px)
@@ -79,16 +83,26 @@ def set_play_projection(window, player, view_mode, zoom):
         while cy >= bottom + h and bottom < world_h - h:
             bottom = min(world_h - h, bottom + stride_y)
 
-        # --- Normal movement edge triggers (reach last visible cell -> jump)
-        if cx <= left:
-            left = max(0, left - stride_x)
-        elif cx >= left + w:
-            left = min(world_w - w, left + stride_x)
+        # --- One-cell pan when the player enters the edge cell(s)
+        EDGE_STEP = CELL_SIZE   # move exactly one grid cell
+        EDGE_CELLS = 1          # how many cells near each edge count as "edge"
 
-        if cy <= bottom:
-            bottom = max(0, bottom - stride_y)
-        elif cy >= bottom + h:
-            bottom = min(world_h - h, bottom + stride_y)
+        left_edge   = left   + EDGE_CELLS * CELL_SIZE
+        right_edge  = left   + w - EDGE_CELLS * CELL_SIZE
+        bottom_edge = bottom + EDGE_CELLS * CELL_SIZE
+        top_edge    = bottom + h - EDGE_CELLS * CELL_SIZE
+
+        # Horizontal panning (one cell)
+        if cx < left_edge:
+            left = max(0, left - EDGE_STEP)
+        elif cx > right_edge:
+            left = min(world_w - w, left + EDGE_STEP)
+
+        # Vertical panning (one cell)
+        if cy < bottom_edge:
+            bottom = max(0, bottom - EDGE_STEP)
+        elif cy > top_edge:
+            bottom = min(world_h - h, bottom + EDGE_STEP)
 
         # Save updated origin
         cam["left"], cam["bottom"] = left, bottom
@@ -101,7 +115,7 @@ def set_play_projection(window, player, view_mode, zoom):
         left, right, bottom, top, -1.0, 1.0
     )
 
-    # Keep your original return contract so nothing else breaks.
+    # Keep the original return contract so nothing else breaks.
     return 2 if view_mode == "local" else 5
 
 
@@ -112,11 +126,10 @@ def reset_ui_projection(window):
         0.0, float(WINDOW_WIDTH), 0.0, float(WINDOW_HEIGHT), -1.0, 1.0
     )
 
-"""-------------collect-------"""
 
 def camera():
+    """Factory to expose camera functions."""
     return {
         "set_play_projection": set_play_projection,
         "reset_ui_projection": reset_ui_projection
     }
-
