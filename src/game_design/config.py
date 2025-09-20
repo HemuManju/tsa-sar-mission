@@ -1,9 +1,8 @@
 # config.py
-import pyglet
 
 # Window & grid
 WINDOW_WIDTH = 1600
-WINDOW_HEIGHT = 800
+WINDOW_HEIGHT = 1200
 CELL_SIZE = 20
 SIDEBAR_W = 380
 PLAY_W_PX = WINDOW_WIDTH - SIDEBAR_W
@@ -106,7 +105,3 @@ DIFFICULTIES = {
 }
 # Fonts
 DEFAULT_FONT = "Arial"
-
-
-def make_window():
-    return pyglet.window.Window(WINDOW_WIDTH, WINDOW_HEIGHT, "SAR Mission")

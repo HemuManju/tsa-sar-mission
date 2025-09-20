@@ -1,7 +1,6 @@
-# controls.py
-from pyglet.window import key
 from chatui import append_line
-from config import MIN_ZOOM, MAX_ZOOM, ZOOM_STEP, PLAY_W_PX, SIDEBAR_W
+from config import MAX_ZOOM, MIN_ZOOM, PLAY_W_PX, SIDEBAR_W, ZOOM_STEP
+from pyglet.window import key, mouse
 
 
 def move(game, dx, dy):
@@ -12,71 +11,47 @@ def move(game, dx, dy):
         game.player[0], game.player[1] = nx, ny
 
 
-def key_press(game, symbol, modifiers):
-    if game.state == "start":
-        if symbol == key.LEFT:
-            game.start_diff_idx = (game.start_diff_idx - 1) % len(game.start_diffs)
-            game.refresh_start_labels()
-            return
-        if symbol == key.RIGHT:
-            game.start_diff_idx = (game.start_diff_idx + 1) % len(game.start_diffs)
-            game.refresh_start_labels()
-            return
-        if symbol in (key._1, key.NUM_1):
-            game.start_diff_idx = 0
-            game.refresh_start_labels()
-            return
-        if symbol in (key._2, key.NUM_2):
-            game.start_diff_idx = 1
-            game.refresh_start_labels()
-            return
-        if symbol in (key._3, key.NUM_3):
-            game.start_diff_idx = 2
-            game.refresh_start_labels()
-            return
-        if symbol in (key.UP, key.DOWN, key.L, key.G):
-            game.start_view = "Global" if game.start_view == "Local" else "Local"
-            if symbol == key.L:
-                game.start_view = "Local"
-            if symbol == key.G:
-                game.start_view = "Global"
-            game.refresh_start_labels()
-            return
-        if symbol in (key.ENTER, key.RETURN):
-            game.apply_start_and_begin()
-            return
-        if symbol in (key.EQUAL, key.NUM_ADD):
-            game.zoom = min(MAX_ZOOM, game.zoom + ZOOM_STEP)
-            return
-        if symbol in (key.MINUS, key.NUM_SUBTRACT):
-            game.zoom = max(MIN_ZOOM, game.zoom - ZOOM_STEP)
-            return
-        return
+# Helper functions for each action
+def handle_difficulty_selection(game, symbol):
+    difficulty_map = {
+        key._1: 0,
+        key._2: 1,
+        key._3: 2,
+    }
 
+    if symbol in difficulty_map:
+        game.start_diff_idx = difficulty_map[symbol]
+        game.refresh_start_labels()
+
+
+def handle_view_toggle(game, symbol):
+    if symbol == key.L or symbol == key.G:
+        # Toggle between "Local" and "Global" view
+        game.start_view = "Local" if game.start_view == "Global" else "Global"
+        game.refresh_start_labels()
+
+
+def handle_zoom(game, symbol):
     if symbol in (key.EQUAL, key.NUM_ADD):
         game.zoom = min(MAX_ZOOM, game.zoom + ZOOM_STEP)
-        return
-    if symbol in (key.MINUS, key.NUM_SUBTRACT):
+    elif symbol in (key.MINUS, key.NUM_SUBTRACT):
         game.zoom = max(MIN_ZOOM, game.zoom - ZOOM_STEP)
-        return
-    if symbol == key.G:
-        game.view_mode = "global" if game.view_mode == "local" else "local"
-        game.hud["labels"]["view"].text = f"View: {game.view_mode.capitalize()}"
-        return
 
-    if symbol in (key.LEFT, key.A):
-        move(game, -1, 0)
-        return
-    if symbol in (key.RIGHT, key.D):
-        move(game, 1, 0)
-        return
-    if symbol in (key.UP, key.W):
-        move(game, 0, 1)
-        return
-    if symbol in (key.DOWN, key.S):
-        move(game, 0, -1)
-        return
 
+def handle_movement(game, symbol):
+    # Unified movement map for both arrow keys and WASD
+    direction_map = {
+        key.LEFT: (-1, 0),
+        key.RIGHT: (1, 0),
+        key.UP: (0, 1),
+        key.DOWN: (0, -1),
+    }
+
+    if symbol in direction_map:
+        move(game, *direction_map[symbol])
+
+
+def handle_chat_input(game, symbol):
     if symbol in (key.ENTER, key.RETURN) and game.chat["focus"]:
         msg = game.chat["input_doc"].text.strip()
         if msg:
@@ -85,15 +60,36 @@ def key_press(game, symbol, modifiers):
         if game.chat["caret"]:
             game.chat["caret"].position = 0
 
+
+def handle_escape(game, symbol):
     if symbol == key.ESCAPE:
         game.chat["focus"] = False
         if game.chat["caret"]:
             game.chat["caret"].visible = False
 
 
-def mouse_press(game, x, y, button, modifiers):
-    from pyglet.window import mouse
+# Main key press handler
+def key_press(game, symbol, modifiers):
+    if game.state == "start":
+        handle_difficulty_selection(game, symbol)
+        handle_view_toggle(game, symbol)
+        handle_zoom(game, symbol)
+        if symbol in (key.ENTER, key.RETURN):
+            game.apply_start_and_begin()
+        return  # Exit after handling start screen actions
 
+    # Handle zoom and movement (shared logic between start and game states)
+    handle_zoom(game, symbol)
+    handle_movement(game, symbol)
+
+    # Handle chat input if relevant
+    handle_chat_input(game, symbol)
+
+    # Handle escape
+    handle_escape(game, symbol)
+
+
+def mouse_press(game, x, y, button, modifiers):
     if button == mouse.LEFT:
         x1 = PLAY_W_PX + 15
         x2 = x1 + SIDEBAR_W - 30
@@ -108,9 +104,6 @@ def mouse_press(game, x, y, button, modifiers):
             game.chat["focus"] = False
             if game.chat["caret"]:
                 game.chat["caret"].visible = False
-
-
-"...........collection......"
 
 
 def controllers():

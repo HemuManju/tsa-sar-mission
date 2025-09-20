@@ -4,7 +4,8 @@ from game import Game
 
 
 def run_sar_mission_game():
-    Game()
+    game = Game()
+    # pyglet.clock.schedule_interval(game.update, 1 / 60.0)
     pyglet.app.run()
 
 

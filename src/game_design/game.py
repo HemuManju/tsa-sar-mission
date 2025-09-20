@@ -1,27 +1,28 @@
-import pyglet
-from pyglet import shapes, text
-from config import *
-from camera import set_play_projection, reset_ui_projection
-from grid import build_grid_lines
-from hud import build_hud
-from chatui import build_chat
-from helpers import bfs_distances
-from world import (
-    generate_walls,
-    place_victims,
-    draw_world,
-    make_rescue_triangle,
-    victim_color,
-)
-from update import tick, second
-from controls import key_press, mouse_press
 import random
 
+import pyglet
+from camera import reset_ui_projection, set_play_projection
+from chatui import build_chat
+from config import *
+from controls import key_press, mouse_press
+from grid import build_grid_lines
+from helpers import bfs_distances
+from hud import build_hud
+from pyglet import shapes, text
+from update import second, tick
+from world import (
+    draw_world,
+    generate_walls,
+    make_rescue_triangle,
+    place_victims,
+    victim_color,
+)
 
-class Game:
+
+class Game(pyglet.window.Window):
     def __init__(self):
-        self.window = make_window()
-        self.window.push_handlers(self)
+        super().__init__(WINDOW_WIDTH, WINDOW_HEIGHT, "SAR Mission")
+        self.push_handlers(self)
         self.PLAY_W, self.PLAY_H = PLAY_W, PLAY_H
         self.play_batch = pyglet.graphics.Batch()
         self.ui_batch = pyglet.graphics.Batch()
@@ -50,7 +51,6 @@ class Game:
             anchor_x="center",
             color=COLOR_TEXT,
             font_size=28,
-            bold=True,
         )
         self.start_diff_label = text.Label(
             "",
@@ -118,15 +118,16 @@ class Game:
         self.hud["status"].text = ""
         self.hud["labels"]["difficulty"].text = ""
 
-        # 🔹 Save and preview the matrix once the game starts
+        # Save and preview the matrix once the game starts
         mat = self.get_matrix()
-        with open("matrix.txt", "w") as f:
-            for row in mat:
-                f.write(" ".join(map(str, row)) + "\n")
-            print(" Full matrix saved to matrix.txt")
-            print("\nPreview columns and rows")
-            for row in mat:  # all rows
-                print(row)  # full row (all columns)
+        # TODO: Change save logic, this is not efficient at all.
+        # with open("matrix.txt", "w") as f:
+        #     for row in mat:
+        #         f.write(" ".join(map(str, row)) + "\n")
+        #     print(" Full matrix saved to matrix.txt")
+        #     print("\nPreview columns and rows")
+        #     for row in mat:  # all rows
+        #         print(row)  # full row (all columns)
 
     def _clear_rescue_visuals(self):
         for t in self.rescue_shapes:
@@ -239,21 +240,25 @@ class Game:
             s.y = self.player_shape.y + CELL_SIZE / 2 + offs[i][1]
 
     def on_draw(self):
-        self.window.clear()
+        self.clear()
         pyglet.gl.glClearColor(
             COLOR_BG[0] / 255.0, COLOR_BG[1] / 255.0, COLOR_BG[2] / 255.0, 1.0
         )
         self.view_range = set_play_projection(
-            self.window, self.player, self.view_mode, self.zoom
+            self, self.player, self.view_mode, self.zoom
         )
         self.play_batch.draw()
-        reset_ui_projection(self.window)
+        reset_ui_projection(self)
         self.ui_batch.draw()
         if self.state == "start":
             self.start_title.draw()
             self.start_diff_label.draw()
             self.start_view_label.draw()
             self.start_hint.draw()
+
+    def update(self, dt):
+        # TODO: Implement the refresh logic
+        pass
 
     def on_key_press(self, symbol, modifiers):
         key_press(self, symbol, modifiers)
@@ -268,9 +273,6 @@ class Game:
     def on_text_motion(self, m):
         if self.chat["focus"] and self.chat["caret"]:
             self.chat["caret"].on_text_motion(m)
-
-
-"...-------------collection------"
 
 
 def game():
