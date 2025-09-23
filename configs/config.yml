@@ -1,2 +1,4 @@
 CELL_SIZE: 25 # Size of each cell in the grid
-ZOOM_LEVEL: 2
+ZOOM_LEVEL: 1
+WIDTH: 2500
+HEIGHT: 2500

@@ -9,12 +9,12 @@ from .walls import GridWorldGenerator
 
 # Main Game Class
 class MainGUI(pyglet.window.Window):
-    def __init__(self, width, height, config):
+    def __init__(self, width, height, config, grid_array=None):
         super().__init__(width, height, caption="Grid World with Wall Shapes")
 
         self.CELL_SIZE = config["CELL_SIZE"]  # Size of each cell in the grid
-        self.GRID_WIDTH = width // self.CELL_SIZE  # Number of columns
-        self.GRID_HEIGHT = height // self.CELL_SIZE  # Number of rows
+        self.GRID_WIDTH = config["WIDTH"] // self.CELL_SIZE  # Number of columns
+        self.GRID_HEIGHT = config["HEIGHT"] // self.CELL_SIZE  # Number of rows
 
         # Handle keys
         self.keys = key.KeyStateHandler()
@@ -22,7 +22,13 @@ class MainGUI(pyglet.window.Window):
         # Generate the grid with walls
         grid_generator = GridWorldGenerator(self.GRID_WIDTH, self.GRID_HEIGHT)
         grid_generator.generate_walls()
-        self.grid_array = grid_generator.get_grid()
+        if grid_array is None:
+            self.grid_array = grid_generator.get_grid()
+        else:
+            self.grid_array = grid_array
+
+        # print(self.grid_array)
+        # print(self.grid_array.shape)
 
         # Place the player in the center of the grid
         self.grid_array[self.GRID_HEIGHT // 2, self.GRID_WIDTH // 2] = (
@@ -55,21 +61,30 @@ class MainGUI(pyglet.window.Window):
         self.view = self.camera.get_view_matrix()
 
     def draw_grid(self):
-        """Draw the grid (walls, free space, and player)."""
+        """Draw the grid with walls, roads, buildings, debris, and player."""
         self.shapes.clear()  # Clear previous shapes
 
-        # Draw walls (black)
-        wall_indices = np.argwhere(self.grid_array == 1)
-        for y, x in wall_indices:
-            wall = shapes.Rectangle(
-                x * self.CELL_SIZE,
-                y * self.CELL_SIZE,
-                self.CELL_SIZE,
-                self.CELL_SIZE,
-                color=(255, 255, 255),
-                batch=self.batch,
-            )
-            self.shapes.append(wall)
+        color_map = {
+            1: (185, 185, 185),  # Wall (light gray)
+            3: (100, 100, 100),  # Debris (dark gray)
+            4: (220, 220, 220),  # Road (light road gray)
+            5: (150, 150, 255),  # Building (blue-ish)
+        }
+
+        for y in range(self.grid_array.shape[0]):
+            for x in range(self.grid_array.shape[1]):
+                cell_value = self.grid_array[y, x]
+                color = color_map.get(cell_value)
+                if color:
+                    rect = shapes.Rectangle(
+                        x * self.CELL_SIZE,
+                        y * self.CELL_SIZE,
+                        self.CELL_SIZE,
+                        self.CELL_SIZE,
+                        color=color,
+                        batch=self.batch,
+                    )
+                    self.shapes.append(rect)
 
     def draw_player(self):
         # Draw the player (blue)
@@ -96,6 +111,7 @@ class MainGUI(pyglet.window.Window):
             0 <= new_x < self.GRID_WIDTH
             and 0 <= new_y < self.GRID_HEIGHT
             and self.grid_array[new_y, new_x] != 1
+            and self.grid_array[new_y, new_x] != 3
         ):
             # Move the player
             self.grid_array[current_y, current_x] = 0  # Set old position to free
